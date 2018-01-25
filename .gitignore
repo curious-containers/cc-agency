@@ -1,0 +1,6 @@
+/.idea
+/MANIFEST
+/dist
+/venv
+/docs/_build
+__pycache__
