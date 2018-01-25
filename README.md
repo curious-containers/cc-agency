@@ -1,6 +1,6 @@
 # CC-Agency
 
-CC-Core is part of the Curious Containers project. It manages a cluster of docker-engines to execute data-driven 
+CC-Agency is part of the Curious Containers project. It manages a cluster of docker-engines to execute data-driven 
 experiments in parallel.
 
 For more information please refer to the Curious Containers [project website](https://www.curious-containers.cc/) and 
