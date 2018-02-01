@@ -1,8 +1,8 @@
 Quickstart Guide
 ================
 
-This tutorial explains how to create a reproducible data-driven experiment and how to document in a RED file. It is
-targeted at researchers who implement or reuse a software application and execute it with certain input arguments and
+This tutorial explains how to create a reproducible data-driven experiment and how to document it in a RED file. It is
+targeted at researchers who implement or reuse software applications to execute them with certain input arguments and
 files to produce outputs.
 
 
