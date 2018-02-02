@@ -109,10 +109,14 @@ Then execute :code:`grepwrap` as follows.
 
 Use :code:`cat out.txt` to check the programs output.
 
-In this case the command :code:`grepwrap -B 1 QU in.txt` is an **experiment**. The next steps of this quickstart guide,
-will demonstrate the formalization of the experiment, which allows for persistent storage, enables distribution and
-improves reproducibility.
+In this case the command :code:`grepwrap -B 1 QU in.txt` is an **experiment** based on the program :code:`grepwrap`,
+which has a defined **CLI** and has :code:`python3` and :code:`grep` as **dependencies**. It is executed with
+:code:`in.txt` as **input** file, as well as :code:`-B 1` and :code:`QU` as **input** arguments. It produces a single
+file :code:`out.txt` as **output**.
 
+The next steps of this quickstart guide, will demonstrate the formalization of the experiment, which allows for
+persistent storage, enables distribution and improves reproducibility. In order to do so, we need to describe the
+**CLI**, **dependencies**, **inputs** and **outputs**.
 
 Common Workflow Language
 ------------------------
