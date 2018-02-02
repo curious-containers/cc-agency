@@ -19,6 +19,6 @@ setup(
     license='AGPL-3.0',
     platforms=['any'],
     install_requires=[
-        'cc-core'
+        'cc-core >= 2.0, < 2.1'
     ]
 )

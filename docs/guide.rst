@@ -84,6 +84,37 @@ Set the executable flag for :code:`grepwrap` and add the current directory to th
    chmod +x grepwrap
    export PATH=$(pwd):${PATH}
 
-The program is a wrapper for :code:`grep`, use :code:`grepwrap --help` to show all CLI arguments. It stores results to
-:code:`out.txt` and has a simplified interface, which is perfect for demonstration purposes.
+
+The program is a wrapper for :code:`grep`. It stores results to :code:`out.txt` and has a simplified interface. Use
+:code:`grepwrap --help` to show all CLI arguments.
+
+
+Create a new file with sample data by inserting the text below with :code:`nano in.txt`. Then save and close the file.
+
+.. code-block:: text
+
+   FOO
+   BAR
+   BAZ
+   QUX
+   QUUX
+
+
+Then execute :code:`grepwrap` as follows.
+
+.. code-block:: bash
+
+   grepwrap -B 1 QU in.txt
+
+
+Use :code:`cat out.txt` to check the programs output.
+
+In this case the command :code:`grepwrap -B 1 QU in.txt` is an **experiment**. The next steps of this quickstart guide,
+will demonstrate the formalization of the experiment, which allows for persistent storage, enables distribution and
+improves reproducibility.
+
+
+Common Workflow Language
+------------------------
+
 
