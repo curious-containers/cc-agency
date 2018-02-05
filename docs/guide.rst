@@ -45,7 +45,7 @@ Create a new file and insert the Python3 code below with :code:`nano grepwrap`. 
 
    OUTPUT_FILE = 'out.txt'
 
-   parser = ArgumentParser(description='Search for query terms in a text file.')
+   parser = ArgumentParser(description='Search for query terms in text files.')
    parser.add_argument(
        'query_term', action='store', type=str, metavar='QUERY_TERM',
        help='Search for QUERY_TERM in TEXT_FILE.'
@@ -81,7 +81,7 @@ Set the executable flag for :code:`grepwrap` and add the current directory to th
 
 .. code-block:: bash
 
-   chmod +x grepwrap
+   chmod u+x grepwrap
    export PATH=$(pwd):${PATH}
 
 
@@ -118,7 +118,87 @@ The next steps of this quickstart guide, will demonstrate the formalization of t
 persistent storage, enables distribution and improves reproducibility. In order to do so, we need to describe the
 **CLI**, **dependencies**, **inputs** and **outputs**.
 
+
+Install CC-Faice and CC-Core
+----------------------------
+
+Install the current version of :code:`cc-faice`, which will also install a compatible version of :code:`cc-core` as a
+dependency.
+
+.. code-block:: bash
+
+   pip3 install --user cc-faice
+
+
+* :code:`cc-core` provides the :code:`ccagent` commandline tool
+* :code:`cc-faice` provides the :code:`faice` commandline tool
+
+Both tools are located in Python's script directory, which should be included in the :code:`PATH` environment variable.
+The following code prints their version numbers.
+
+.. code-block:: bash
+
+   ccagent --version
+   faice --version
+
+
+If this doesn't work, you should modify :code:`PATH` or fall back to executing the tools as Python modules.
+
+.. code-block:: bash
+
+   python3 -m cc_core.agent --version
+   python3 -m cc_faice --version
+
+
+Please note that :code:`cc-core` and :code:`cc-faice` are compatible, if the first two numbers of their versions match
+(e.g. 2.0.1 and 2.0.2 are compatible).
+
+
 Common Workflow Language
 ------------------------
 
+.. code-block:: yaml
+
+   cwlVersion: "v1.0"
+   class: "CommandLineTool"
+   baseCommand: "grepwrap"
+   doc: "Search for query terms in text files."
+
+   inputs:
+     query_term:
+       type: "string"
+       inputBinding:
+         position: 0
+       doc: "Search for QUERY_TERM in TEXT_FILE."
+     text_file:
+       type: "File"
+       inputBinding:
+         position: 1
+       doc: "TEXT_FILE containing plain text."
+     after_context:
+       type: "int?"
+       inputBinding:
+         prefix: "-A"
+       doc: "Print NUM lines of trailing context after matching lines."
+     before_context:
+       type: "int?"
+       inputBinding:
+         prefix: "-B"
+       doc: "Print NUM lines of leading context before matching lines."
+
+   outputs:
+     out_file:
+       type: "File"
+       outputBinding:
+         glob: "out.txt"
+       doc: "Query results."
+
+
+.. code-block:: yaml
+
+   query_term: QU
+   text_file:
+     class: File
+     path: "in.txt"
+   before_context: 1
 
