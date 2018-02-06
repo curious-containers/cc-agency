@@ -7,6 +7,7 @@ Index
    self
    introduction
    guide
+   versions
+   connectors
    research
-   compatibility
    acknowledgements
