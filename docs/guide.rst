@@ -127,7 +127,7 @@ dependency.
 
 .. code-block:: bash
 
-   pip3 install --user cc-faice
+   pip3 install --user cc-faice==2.0.1
 
 
 * :code:`cc-core` provides the :code:`ccagent` commandline tool
@@ -298,10 +298,19 @@ Use the :code:`ccagent red` subcommand to run and execute the experiment.
    ccagent red ./grepwrap-cli.cwl ./red-inputs.yml
 
 
-TODO
+The RED format also requires connector descriptions for output files. Usually an external host with a static IP / domain
+name and a proper Authorization configuration should be chosen for this. This improves reproducibility, because all
+destinations of the original experiment results are well documented.
+
+For the purpose of this guide, we start a local HTTP server on TCP PORT 5000 to receive the output file.
+
+.. code-block:: bash
+
+   # start server as background job
+   faice file-server &
 
 
-Create a new file new file and insert the following RED inputs data with :code:`nano red-outputs.yml`.
+Create a new file new file and insert the following RED outputs data with :code:`nano red-outputs.yml`.
 
 .. code-block:: yaml
 
@@ -314,6 +323,86 @@ Create a new file new file and insert the following RED inputs data with :code:`
          url: "http://localhost:5000/server-out.txt"
          method: "POST"
 
+
+Use the :code:`ccagent red` subcommand to run and execute the experiment.
+
+.. code-block:: bash
+
+   ccagent red ./grepwrap-cli.cwl ./red-inputs.yml -o ./red-outputs.yml
+
+
+The :code:`faice file-server` is programmed to use the file name specified in the URL. Use :code:`cat server-out.txt`
+to check the programs output.
+
+You can stop the file-server as follows.
+
+.. code-block:: bash
+
+   # terminate the last background job
+   kill %%
+
+
+Container Image
+---------------
+
+The next step is to explicitely document the runtime environment with all required dependencies of :code:`grepwrap`.
+Container technologies are useful to create this kind reproducible and distributable environment. For the time being,
+the only container engine supported by Curious Containers is `Docker <https://www.docker.com/>`__.
+
+Create a new file new file and insert the following Dockerfile description with :code:`nano Dockerfile`.
+
+.. code-block:: docker
+
+   FROM docker.io/debian:9.3-slim
+
+   RUN apt-get update \
+   && apt-get install -y python3-pip \
+   && useradd -ms /bin/bash cc
+
+   # install cc-core
+   USER cc
+
+   RUN pip3 install --no-input --user cc-core==2.0.2
+
+   ENV PATH="/home/cc/.local/bin:${PATH}"
+   ENV PYTHONPATH="/home/cc/.local/lib/python3.5/site-packages/"
+
+   # install app
+   ADD grepwrap /home/cc/.local/bin/grepwrap
+
+
+As can be seen in the Dockerfile, we extend a slim Debian image from the official
+`DockerHub <https://hub.docker.com/>`__ registry. To improve reproducibility, you should always add a very specific
+tag like :code:`9.3-slim` or an
+`image digest <https://docs.docker.com/engine/reference/commandline/images/#list-image-digests>`__.
+
+As a first step, :code:`python3-pip` is installed from Debian repositories, then a new user :code:`cc` is created. This
+is important, because :code:`faice` will always start a container with :code:`uid:gid` set to :code:`1000:1000`. This
+behavior is equivalent to :code:`cwltool`. As a next step the Dockerfile switches to the :code:`cc` user, installs
+:code:`cc-core==2.0.2` and explicitely sets required environment variables. Again, to ensure reproducible builds, it is
+advised to specify a certain version of :code:`cc-core`. The last step is to install the application itself. In this
+case the :code:`grepwrap` script is copied into the user's home directory.
+
+Please note, that installing :code:`cc-core` is necessary for compatibility with Curious Containers. This package
+provides the :code:`ccagent` script with all the functionality demonstrated in this guide.
+
+Use the Docker client to build the image and name it :code:`grepwrap-image`.
+
+.. code-block:: bash
+
+   docker build --tag grepwrap-image .
+
+
+Use :code:`docker image list` to check if the new image exists.
+
+You should consider pushing the image to a registry like `DockerHub <https://hub.docker.com/>`__ and reference it by its
+full URL. This ensures reproducibility across hosts. With RED it is also possible to use private Docker registries where
+authorization is required. For the sake of this guide, we will only reference the image by its local name
+:code:`grepwrap-image`.
+
+
+FAICE
+-----
 
 TODO
 
