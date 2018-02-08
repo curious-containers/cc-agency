@@ -1,9 +1,8 @@
 RED Guide
 =========
 
-This tutorial explains how to create a reproducible data-driven experiment and how to document it in a RED file. It is
-targeted at researchers who implement or reuse software applications to execute them with certain input arguments and
-files to produce outputs.
+This tutorial explains how to create a reproducible data-driven experiment and how to document it in a Reproducible
+Experiment Description (RED).
 
 
 Prerequisites
@@ -332,7 +331,7 @@ connector implementations.
 The given HTTP connector is a reference implementation and the only connector included with :code:`cc-core` (see
 `RED Connectors <connectors.html>`_ for different options).
 
-Use :code:`faice schemas show red-connector-http` to show the corresponding jsonschema and all connector options,
+Use :code:`faice schema show red-connector-http` to show the corresponding jsonschema and all connector options,
 including BASIC or DIGEST auth.
 
 
@@ -594,7 +593,7 @@ Use the :code:`faice agent red` commandline tool to execute the experiment.
 
 
 Learn more about the container engine description by showing the corresponding jsonschema with
-:code:`faice schema show engine-container-docker` (also see `RED Engines <engines.html>`__).
+:code:`faice schema show red-engine-container-docker` (also see `RED Engines <engines.html>`__).
 
 Again connector descriptions for output files can be included in the RED file. Open the existing file and append the
 following :code:`outputs` section with :code:`nano red-docker.yml`.

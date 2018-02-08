@@ -10,6 +10,4 @@ extends the `CommandLineTool description format <http://www.commonwl.org/v1.0/Co
 `Common Workflow Language <http://www.commonwl.org/>`__ (CWL). Although RED is an extension to CWL, it remains full CWL
 compatibility via an automatic export tool in the FAICE toolsuite.
 
-Tools and Features
-------------------
-
+Learn more in the comprehensive `RED Guide <guide.html>`__.
