@@ -24,8 +24,8 @@ First install Git, Vagrant and Virtualbox.
 
 .. code-block:: bash
 
-   git clone https://github.com/curious-containers/vagrant-quickstart.git
-   cd vagrant-quickstart
+   git clone https://github.com/curious-containers/red-guide-vagrant.git
+   cd red-guide-vagrant
    vagrant up
    vagrant ssh
 
@@ -425,7 +425,7 @@ tag like :code:`9.3-slim` or an
 As a first step, :code:`python3-pip` is installed from Debian repositories, then a new user :code:`cc` is created. This
 is important, because :code:`faice` will always start a container with :code:`uid:gid` set to :code:`1000:1000`. This
 behavior is equivalent to :code:`cwltool`. As a next step the Dockerfile switches to the :code:`cc` user, installs
-:code:`cc-core==2.0.2` and explicitely sets required environment variables. Again, to ensure reproducible builds, it is
+:code:`cc-core==3.0.0` and explicitely sets required environment variables. Again, to ensure reproducible builds, it is
 advised to specify a certain version of :code:`cc-core`. The last step is to install the application itself. In this
 case the :code:`grepwrap` script is added to the image.
 
