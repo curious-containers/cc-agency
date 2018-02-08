@@ -9,5 +9,6 @@ Index
    guide
    versions
    connectors
+   engines
    research
    acknowledgements
