@@ -150,7 +150,8 @@ The :code:`--help` argument shows available subtools and CLIs.
    faice --help
 
 
-If these tools cannot be found, you should modify :code:`PATH` or fall back to executing the tools as Python modules.
+If these tools cannot be found, you should modify :code:`PATH` (e.g. append :code:`${HOME}/.local/bin`) or fall back
+to executing the tools as Python modules.
 
 .. code-block:: bash
 
