@@ -527,7 +527,7 @@ image.
 A compatible RED file is very similar to the RED file used :code:`ccagent red`, but requires an additional
 :code:`container` section.
 
-Create a new file and insert the following RED data with :code:`nano red-docker.cwl`.
+Create a new file and insert the following RED data with :code:`nano red-docker.yml`.
 
 .. code-block:: yaml
 
