@@ -612,7 +612,7 @@ following :code:`outputs` section with :code:`nano red-docker.yml`.
             method: "POST"
 
 
-Please note, that in this case we are running the experience in a container. In order to send output files from a
+Please note, that in this case we are running the experiment in a container. In order to send output files from a
 container to the :code:`faice file-server` running on the host, we use the standard Docker bridge IP :code:`172.17.0.1`.
 Use :code:`ifconfig` to check if another IP has been assigned to the Docker bridge on your system.
 
