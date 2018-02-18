@@ -7,7 +7,7 @@ description = 'CC-Core is part of the Curious Containers project. It manages a c
 
 setup(
     name='cc-agency',
-    version='3.0.0',
+    version='3.1.0',
     summary=description,
     description=description,
     author='Christoph Jansen',
@@ -19,6 +19,6 @@ setup(
     license='AGPL-3.0',
     platforms=['any'],
     install_requires=[
-        'cc-core >= 3.0, < 3.1'
+        'cc-core >= 3.1, < 3.2'
     ]
 )
