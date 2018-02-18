@@ -127,7 +127,7 @@ dependency.
 
 .. code-block:: bash
 
-   pip3 install --user cc-faice==3.0.0
+   pip3 install --user cc-faice==3.0.1
 
 
 * :code:`cc-core` provides the :code:`ccagent` commandline tool
