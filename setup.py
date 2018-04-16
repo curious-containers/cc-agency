@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 
-from distutils.core import setup
+from setuptools import setup
 
 description = 'CC-Core is part of the Curious Containers project. It manages a cluster of docker-engines to execute ' \
               'data-driven experiments in parallel.'
 
 setup(
     name='cc-agency',
-    version='3.1.0',
+    version='3.2.0',
     summary=description,
     description=description,
     author='Christoph Jansen',
@@ -19,6 +19,6 @@ setup(
     license='AGPL-3.0',
     platforms=['any'],
     install_requires=[
-        'cc-core >= 3.1, < 3.2'
+        'cc-core >= 3.2, < 3.3'
     ]
 )

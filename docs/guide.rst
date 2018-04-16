@@ -127,7 +127,7 @@ dependency.
 
 .. code-block:: bash
 
-   pip3 install --user cc-faice==3.1.0
+   pip3 install --user cc-faice==3.2.0
 
 
 * :code:`cc-core` provides the :code:`ccagent` commandline tool
@@ -408,7 +408,7 @@ Create a new file and insert the following Dockerfile description with :code:`na
    # install cc-core
    USER cc
 
-   RUN pip3 install --no-input --user cc-core==3.1.0
+   RUN pip3 install --no-input --user cc-core==3.2.0
 
    ENV PATH="/home/cc/.local/bin:${PATH}"
    ENV PYTHONPATH="/home/cc/.local/lib/python3.5/site-packages/"
@@ -425,7 +425,7 @@ tag like :code:`9.3-slim` or an
 As a first step, :code:`python3-pip` is installed from Debian repositories, then a new user :code:`cc` is created. This
 is important, because :code:`faice` will always start a container with :code:`uid:gid` set to :code:`1000:1000`. This
 behavior is equivalent to :code:`cwltool`. As a next step the Dockerfile switches to the :code:`cc` user, installs
-:code:`cc-core==3.1.0` and explicitely sets required environment variables. Again, to ensure reproducible builds, it is
+:code:`cc-core==3.2.0` and explicitely sets required environment variables. Again, to ensure reproducible builds, it is
 advised to specify a certain version of :code:`cc-core`. The last step is to install the application itself. In this
 case the :code:`grepwrap` script is added to the image.
 
