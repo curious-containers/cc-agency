@@ -1,7 +1,1 @@
 /.idea
-/MANIFEST
-/dist
-/venv
-/docs/venv
-/docs/_build
-__pycache__
