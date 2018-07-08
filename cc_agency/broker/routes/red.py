@@ -27,5 +27,5 @@ def red_routes(app, mongo, auth):
         # strip red data
         # insert red into database
         # insert batches into database
-        
+
         return jsonify({'Hello': 'World'})
