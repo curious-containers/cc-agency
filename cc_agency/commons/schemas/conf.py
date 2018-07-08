@@ -22,7 +22,6 @@ conf_schema = {
         'controller': {
             'type': 'object',
             'properties': {
-                'log_file_path': {'type': 'string'},
                 'bind_host': {'type': 'string'},
                 'bind_port': {'type': 'integer'},
                 'docker': {
@@ -77,7 +76,7 @@ conf_schema = {
                 }
             },
             'additionalProperties': False,
-            'required': ['log_file_path', 'bind_host', 'bind_port']
+            'required': ['bind_host', 'bind_port']
         },
         'mongo': {
             'type': 'object',

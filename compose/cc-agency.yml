@@ -6,7 +6,6 @@ broker:
     tokens_valid_for_seconds: 86400  # 24 h
 
 controller:
-  log_file_path: "~/.cache/cc-agency/log.txt"
   bind_host: "localhost"
   bind_port: 6001
   docker:
