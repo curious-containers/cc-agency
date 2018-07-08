@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cc-agency"
-version = "4.0.0"
+version = "5.1.0"
 authors = ["Christoph Jansen <Christoph.Jansen@htw-berlin.de>"]
 license = "AGPL-3.0"
 readme = "README.md"
@@ -16,9 +16,12 @@ jsonschema = "^2.6"
 docker = "^3.4"
 pyzmq = "^17.0"
 "ruamel.yaml" = "^0.15.41"
+pymongo = "^3.7"
+cryptography = "^2.2"
 
 [tool.poetry.dev-dependencies]
 
 [tool.poetry.scripts]
-cc-agency-broker = 'cc_agency.broker.main:main'
-cc-agency-controller = 'cc_agency.controller.main:main'
+ccagency-broker = 'cc_agency.broker.main:main'
+ccagency-controller = 'cc_agency.controller.main:main'
+ccagency = 'cc_agency.tools.main:main'

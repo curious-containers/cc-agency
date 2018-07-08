@@ -4,10 +4,20 @@ conf_schema = {
         'broker': {
             'type': 'object',
             'properties': {
-                'external_url': {'type': 'string'}
+                'external_url': {'type': 'string'},
+                'auth': {
+                    'type': 'object',
+                    'properties': {
+                        'num_login_attempts': {'type': 'integer'},
+                        'block_for_seconds': {'type': 'integer'},
+                        'tokens_valid_for_seconds': {'type': 'integer'}
+                    },
+                    'additionalProperties': False,
+                    'required': ['num_login_attempts', 'block_for_seconds', 'tokens_valid_for_seconds']
+                }
             },
             'additionalProperties': False,
-            'required': ['external_url']
+            'required': ['external_url', 'auth']
         },
         'controller': {
             'type': 'object',
@@ -30,10 +40,10 @@ conf_schema = {
                                     },
                                     'additionalProperties': False,
                                     'required': ['username', 'password']
-                                },
-                                'additionalProperties': False,
-                                'required': ['image_url']
-                            }
+                                }
+                            },
+                            'additionalProperties': False,
+                            'required': ['image_url']
                         },
                         'nodes': {
                             'type': 'object',
@@ -69,12 +79,19 @@ conf_schema = {
             'additionalProperties': False,
             'required': ['log_file_path', 'bind_host', 'bind_port']
         },
-        'db': {
+        'mongo': {
             'type': 'object',
-            'properties': {},
-            'additionalProperties': False
+            'properties': {
+                'host': {'type': 'string'},
+                'port': {'type': 'integer'},
+                'db': {'type': 'string'},
+                'username': {'type': 'string'},
+                'password': {'type': 'string'}
+            },
+            'additionalProperties': False,
+            'required': ['db', 'username', 'password']
         }
     },
     'additionalProperties': False,
-    'required': ['broker', 'controller', 'db']
+    'required': ['broker', 'controller', 'mongo']
 }

@@ -8,11 +8,10 @@ class InspectionError(Exception):
 
 
 class ClientProxy:
-    def __init__(self, node_name, conf, db, logger):
+    def __init__(self, node_name, conf, db):
         self._node_name = node_name
         self._conf = conf
         self._db = db
-        self._logger = logger
 
         api_timeout = conf.d['controller']['docker']['api_timeout']
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
@@ -38,10 +37,10 @@ class ClientProxy:
             try:
                 # if a block signal is queued, no exception is raised
                 _ = self._block_actions_q.get_nowait()
-                self._logger.push(['Node {} got blocked for inspection.'.format(self._node_name)])
+                print('Node {} got blocked for inspection.'.format(self._node_name))
                 # if no exception got raised, wait for unblock signal
                 _ = self._block_actions_q.get()
-                self._logger.push(['Node {} got unblocked.'.format(self._node_name)])
+                print('Node {} got unblocked.'.format(self._node_name))
             except:
                 pass
 
@@ -78,9 +77,7 @@ class ClientProxy:
         pass
 
     def _inspect(self):
-        self._logger.push({'lines': [
-            'Inspect node {}.'.format(self._node_name)
-        ]})
+        print('Inspect node {}.'.format(self._node_name))
 
         image_url = self._conf.d['controller']['docker']['core_image']['image_url']
 

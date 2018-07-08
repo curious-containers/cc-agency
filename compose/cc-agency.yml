@@ -1,0 +1,20 @@
+broker:
+  external_url: "localhost:6000"
+  auth:
+    num_login_attempts: 3
+    block_for_seconds: 30
+    tokens_valid_for_seconds: 86400  # 24 h
+
+controller:
+  log_file_path: "~/.cache/cc-agency/log.txt"
+  bind_host: "localhost"
+  bind_port: 6001
+  docker:
+    core_image:
+      image_url: ""
+    nodes: {}
+
+mongo:
+  db: "ccagency"
+  username: "ccadmin"
+  password: "SECRET"
