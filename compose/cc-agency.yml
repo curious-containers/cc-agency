@@ -1,11 +1,12 @@
 broker:
-  external_url: "localhost:6000"
+  external_url: "http://localhost:6000"
   auth:
     num_login_attempts: 3
     block_for_seconds: 30
     tokens_valid_for_seconds: 86400  # 24 h
 
 controller:
+  external_url: "tcp://127.0.0.1:6000"
   bind_host: "127.0.0.1"
   bind_port: 6001
   docker:

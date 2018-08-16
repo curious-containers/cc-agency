@@ -22,6 +22,7 @@ conf_schema = {
         'controller': {
             'type': 'object',
             'properties': {
+                'external_url': {'type': 'string'},
                 'bind_host': {'type': 'string'},
                 'bind_port': {'type': 'integer'},
                 'docker': {
@@ -76,7 +77,7 @@ conf_schema = {
                 }
             },
             'additionalProperties': False,
-            'required': ['bind_host', 'bind_port']
+            'required': ['external_url', 'bind_host', 'bind_port']
         },
         'mongo': {
             'type': 'object',
