@@ -27,6 +27,6 @@ def main():
 
     while True:
         data = socket.recv_json()
-        action = data['destination']
-        if action == 'red':
-            pass
+        destination = data['destination']
+        if destination == 'scheduler':
+            print('Scheduler received ping.')
