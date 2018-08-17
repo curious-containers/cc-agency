@@ -1,6 +1,8 @@
 from argparse import ArgumentParser
 import zmq
 
+from cc_core.version import VERSION as CORE_VERSION
+from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
 
 
@@ -8,6 +10,9 @@ DESCRIPTION = 'CC-Agency Controller'
 
 
 def main():
+    print('CC-Agency Version:', AGENCY_VERSION)
+    print('CC-Core Version:', CORE_VERSION)
+
     parser = ArgumentParser(description=DESCRIPTION)
     parser.add_argument(
         '-c', '--conf-file', action='store', type=str, metavar='CONF_FILE',
@@ -27,6 +32,10 @@ def main():
 
     while True:
         data = socket.recv_json()
+
+        if 'destination' not in data:
+            continue
+
         destination = data['destination']
         if destination == 'scheduler':
             print('Scheduler received ping.')

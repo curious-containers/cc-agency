@@ -6,7 +6,7 @@ broker:
     tokens_valid_for_seconds: 86400  # 24 h
 
 controller:
-  external_url: "tcp://127.0.0.1:6000"
+  external_url: "tcp://127.0.0.1:6001"
   bind_host: "127.0.0.1"
   bind_port: 6001
   docker:

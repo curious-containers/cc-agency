@@ -1,9 +1,11 @@
 from argparse import ArgumentParser
 
-from flask import Flask, jsonify
+from flask import Flask, jsonify, request
+from werkzeug.exceptions import Unauthorized
 import zmq
 
-from cc_agency.version import VERSION
+from cc_core.version import VERSION as CORE_VERSION
+from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
 from cc_agency.commons.db import Mongo
 from cc_agency.broker.auth import Auth
@@ -29,10 +31,24 @@ context = zmq.Context()
 controller = context.socket(zmq.PUSH)
 controller.connect(conf.d['controller']['external_url'])
 
+controller.send_json({'Hello': 'World'})
+
 
 @app.route('/', methods=['GET'])
 def get_root():
-    return jsonify({'version': VERSION})
+    return jsonify({'Hello': 'World'})
+
+
+@app.route('/version', methods=['GET'])
+def get_version():
+    user = auth.verify_user(request.authorization)
+    if not user:
+        raise Unauthorized()
+
+    return jsonify({
+        'agencyVersion': AGENCY_VERSION,
+        'coreVersion': CORE_VERSION
+    })
 
 
 red_routes(app, mongo, auth, controller)

@@ -38,11 +38,15 @@ def _prepare_red_data(data, user):
         batches = data['batches']
     else:
         batches = [{
+            'username': user['username'],
+            'registrationTime': timestamp,
             'state': 'registered',
+            'node': None,
             'history': [{
                 'state': 'registered',
                 'time': timestamp,
-                'debugInfo': None
+                'debugInfo': None,
+                'node': None
             }],
             'attempts': 0,
             'inputs': data['inputs'],
@@ -55,14 +59,14 @@ def _prepare_red_data(data, user):
 def red_routes(app, mongo, auth, controller):
     @app.route('/red', methods=['POST'])
     def post_red():
-        user = auth(request.auth)
+        user = auth.verify_user(request.authorization)
         if not user:
             raise Unauthorized()
 
-        try:
-            data = request.json()
-        except Exception:
+        if not request.json:
             raise BadRequest('Did not send RED data as JSON.')
+
+        data = request.json
 
         try:
             jsonschema.validate(data, red_schema)
@@ -94,9 +98,9 @@ def red_routes(app, mongo, auth, controller):
         experiment_id = str(experiment_id)
 
         for batch in batches:
-            batch['experiment_id'] = experiment_id
+            batch['experimentId'] = experiment_id
 
         mongo.db['batches'].insert_many(batches)
         controller.send_json({'destination': 'scheduler'})
 
-        return jsonify({'experiment_id': experiment_id})
+        return jsonify({'experimentId': experiment_id})
