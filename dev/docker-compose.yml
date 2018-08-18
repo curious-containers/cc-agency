@@ -13,7 +13,7 @@ services:
     volumes:
       - ./cc-agency.yml:/root/.config/cc-agency.yml:ro,z
       - ../cc_agency:/opt/cc-agency/cc_agency:ro,z
-    command: "poetry run python3 -u -m cc_agency.tools create-db-user --host mongo"
+    command: "python3 -u -m cc_agency.tools.create_db_user --host mongo"
     links:
       - mongo
     tty: true

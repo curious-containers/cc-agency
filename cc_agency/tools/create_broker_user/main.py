@@ -46,9 +46,9 @@ def run(conf_file):
     is_admin = is_admin == 'yes' or is_admin == 'y'
 
     if is_admin:
-        print('Admin rights GRANTED!')
+        print('Admin privileges GRANTED!')
     else:
-        print('Admin rights NOT granted!')
+        print('Admin privileges NOT granted!')
 
     auth.create_user(username, password, is_admin=is_admin)
     print('Done!')

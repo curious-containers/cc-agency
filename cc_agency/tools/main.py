@@ -6,9 +6,11 @@ from cc_agency.version import VERSION
 
 from cc_agency.tools.create_db_user.main import main as create_db_user_main
 from cc_agency.tools.create_broker_user.main import main as create_broker_user_main
+from cc_agency.tools.drop_db_collections.main import main as drop_db_collections_main
 
 from cc_agency.tools.create_db_user.main import DESCRIPTION as CREATE_DB_USER_DESCRIPTION
 from cc_agency.tools.create_broker_user.main import DESCRIPTION as CREATE_BROKER_USER_DESCRIPTION
+from cc_agency.tools.drop_db_collections.main import DESCRIPTION as DROP_DB_COLLECTIONS_DESCRIPTION
 
 
 SCRIPT_NAME = 'ccagency'
@@ -18,7 +20,8 @@ DESCRIPTION = 'CC-Agency Copyright (C) 2018  Christoph Jansen. This software is 
 
 MODES = OrderedDict([
     ('create-db-user', {'main': create_db_user_main, 'description': CREATE_DB_USER_DESCRIPTION}),
-    ('create-broker-user', {'main': create_broker_user_main, 'description': CREATE_BROKER_USER_DESCRIPTION})
+    ('create-broker-user', {'main': create_broker_user_main, 'description': CREATE_BROKER_USER_DESCRIPTION}),
+    ('drop-db-collections', {'main': drop_db_collections_main, 'description': DROP_DB_COLLECTIONS_DESCRIPTION})
 ])
 
 
