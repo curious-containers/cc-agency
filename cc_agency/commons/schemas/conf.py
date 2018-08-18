@@ -31,8 +31,8 @@ conf_schema = {
                         'core_image': {
                             'type': 'object',
                             'properties': {
-                                'image_url': {'type': 'string'},
-                                'registry_auth': {
+                                'url': {'type': 'string'},
+                                'auth': {
                                     'type': 'object',
                                     'properties': {
                                         'username': {'type': 'string'},
@@ -43,7 +43,7 @@ conf_schema = {
                                 }
                             },
                             'additionalProperties': False,
-                            'required': ['image_url']
+                            'required': ['url']
                         },
                         'nodes': {
                             'type': 'object',

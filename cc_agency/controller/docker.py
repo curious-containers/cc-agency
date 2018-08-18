@@ -1,110 +1,177 @@
 import docker
 from queue import Queue
 from threading import Thread
+from time import time
+from traceback import format_exc
+from bson.objectid import ObjectId
 
 
 class InspectionError(Exception):
     pass
 
 
+class ClientProxyError(Exception):
+    pass
+
+
 class ClientProxy:
-    def __init__(self, node_name, conf, db):
+    def __init__(self, node_name, conf, mongo):
         self._node_name = node_name
         self._conf = conf
-        self._db = db
+        self._mongo = mongo
 
-        api_timeout = conf.d['controller']['docker']['api_timeout']
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
-
-        tls = False
+        self._base_url = node_conf['base_url']
+        self._tls = False
         if 'tls' in node_conf:
-            tls = docker.tls.TLSConfig(**node_conf['tls'])
+            self._tls = docker.tls.TLSConfig(**node_conf['tls'])
+        self._tls = False
+        self._external_url = conf.d['broker']['external_url'].rstrip('/')
 
-        self.client = docker.APIClient(
-            base_url=node_conf['base_url'],
-            tls=tls,
-            timeout=api_timeout,
-            version='auto'
+        self._action_q = None
+        self._client = None
+        self._online = None
+
+        node = {
+            'nodeName': node_name,
+            'state': None,
+            'history': []
+        }
+
+        bson_node_id = self._mongo.db['nodes'].insert_one(node).inserted_id
+        self._node_id = str(bson_node_id)
+
+        try:
+            self._client = docker.APIClient(base_url=self._base_url, tls=self._tls, version='auto')
+        except Exception:
+            self._set_offline(format_exc())
+            return
+
+        self._set_online()
+        self._action_q = Queue()
+        Thread(target=self._action_loop).start()
+
+    def _set_online(self):
+        print('Node online:', self._node_name)
+
+        self._online = True
+        bson_node_id = ObjectId(self._node_id)
+        self._mongo.db['nodes'].update_one(
+            {'_id': bson_node_id},
+            {
+                '$set': {'state': 'online'},
+                '$push': {
+                    'history': {
+                        'state': 'online',
+                        'time': time(),
+                        'debugInfo': None
+                    }
+                }
+            }
         )
 
+    def _set_offline(self, debug_info):
+        print('Node offline:', self._node_name)
+
+        self._online = False
+        bson_node_id = ObjectId(self._node_id)
+        self._mongo.db['nodes'].update_one(
+            {'_id': bson_node_id},
+            {
+                '$set': {'state': 'offline'},
+                '$push': {
+                    'history': {
+                        'state': 'offline',
+                        'time': time(),
+                        'debugInfo': debug_info
+                    }
+                }
+            }
+        )
+
+    def inspect_offline_node(self):
+        if self._online:
+            return
+
+        try:
+            self._client = docker.APIClient(base_url=self._base_url, tls=self._tls, version='auto')
+            self._inspect()
+        except Exception:
+            return
+
+        self._set_online()
         self._action_q = Queue()
-        self._block_actions_q = Queue(maxsize=1)
-
-        Thread(target=self._pull).start()
-
-    def _pull(self):
-        while True:
-            try:
-                # if a block signal is queued, no exception is raised
-                _ = self._block_actions_q.get_nowait()
-                print('Node {} got blocked for inspection.'.format(self._node_name))
-                # if no exception got raised, wait for unblock signal
-                _ = self._block_actions_q.get()
-                print('Node {} got unblocked.'.format(self._node_name))
-            except:
-                pass
-
-            data = self._action_q.get()
-            action = data['action']
-
-            if action == 'run_container':
-                self._run_container(
-                    container_id=data['container_id']
-                )
-            elif action == 'remove_container':
-                self._remove_container(
-                    container_id=data['container_id']
-                )
-            elif action == 'update_image':
-                self._update_image(
-                    image_url=data['image_url'],
-                    registry_auth=data.get('registry_auth')
-                )
-
-    def _run_container(self, container_id):
-        pass
-
-    def _remove_container(self, container_id):
-        pass
-
-    def _wait_for_container(self, container_id):
-        pass
-
-    def _containers(self):
-        pass
-
-    def _update_image(self, image_url, registry_auth):
-        pass
+        Thread(target=self._action_loop).start()
 
     def _inspect(self):
-        print('Inspect node {}.'.format(self._node_name))
+        print('Node inspection:', self._node_name)
 
-        image_url = self._conf.d['controller']['docker']['core_image']['image_url']
+        core_image_conf = self._conf.d['controller']['docker']['core_image']
+        image = core_image_conf['url']
+        auth = core_image_conf.get('auth')
+        command = 'ccagent connected {} --inspect'.format(self._external_url)
 
-        self._update_image(
-            image_url,
-            self._conf.d['controller']['docker']['core_image'].get('registry_auth')
+        self._client.images.pull(image, auth_config=auth)
+        self._client.containers.run(
+            image,
+            command,
+            user='1000:1000',
+            remove=True
         )
 
-        command = 'ccagent connected {} --inspect'.format(
-            self._conf.d['broker']['external_url'].rstrip('/')
-        )
+    def _batch_failure(self, batch_id, debug_info):
+        pass
 
-        container_id = None
+    def _image_failure(self, image, debug_info):
+        pass
 
-        self._run_container(
-            container_id=container_id
-        )
+    def _action_loop(self):
+        while True:
+            data = self._action_q.get()
 
-        self._wait_for_container(container_id)
+            if 'action' not in data:
+                continue
 
-        for key, val in self._containers().items():
-            if key == container_id:
-                if val['exit_status'] != 0:
-                    s = 'Inspection container on node {} exited with code {}: {}'.format(
-                        self._node_name, val['exit_status'], val['description']
-                    )
-                    raise InspectionError(s)
-                break
+            action = data['action']
 
-        self._remove_container(container_id)
+            inspect = False
+
+            if action == 'start_batch_container':
+                try:
+                    self._start_batch_container(batch_id=data['batch_id'])
+                except Exception:
+                    inspect = True
+                    self._batch_failure(data['batch_id'], format_exc())
+
+            elif action == 'remove_batch_container':
+                try:
+                    self._remove_batch_container(batch_id=data['batch_id'])
+                except Exception:
+                    pass
+
+            elif action == 'pull_image':
+                try:
+                    self._pull_image(image=data['url'], auth=data.get('auth'))
+                except:
+                    inspect = True
+                    self._image_failure(data['url'], format_exc())
+
+            if inspect:
+                try:
+                    self._inspect()
+                except Exception:
+                    self._set_offline(format_exc())
+                    self._action_q = None
+                    self._client = None
+
+            if not self._online:
+                return
+
+    def _start_batch_container(self, batch_id):
+        pass
+
+    def _remove_batch_container(self, batch_id):
+        pass
+
+    def _pull_image(self, image, auth):
+        pass

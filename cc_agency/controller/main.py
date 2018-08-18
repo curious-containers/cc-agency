@@ -4,6 +4,8 @@ import zmq
 from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
+from cc_agency.commons.db import Mongo
+from cc_agency.controller.scheduler import Scheduler
 
 
 DESCRIPTION = 'CC-Agency Controller'
@@ -22,6 +24,8 @@ def main():
 
     # Singletons
     conf = Conf(args.conf_file)
+    mongo = Mongo(conf)
+    scheduler = Scheduler(conf, mongo)
 
     context = zmq.Context()
     socket = context.socket(zmq.PULL)
@@ -38,4 +42,4 @@ def main():
 
         destination = data['destination']
         if destination == 'scheduler':
-            print('Scheduler received ping.')
+            scheduler.schedule()

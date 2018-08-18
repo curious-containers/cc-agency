@@ -94,8 +94,8 @@ def red_routes(app, mongo, auth, controller):
 
         experiment, batches = _prepare_red_data(data, user)
 
-        experiment_id = mongo.db['experiments'].insert_one(experiment).inserted_id
-        experiment_id = str(experiment_id)
+        bson_experiment_id = mongo.db['experiments'].insert_one(experiment).inserted_id
+        experiment_id = str(bson_experiment_id)
 
         for batch in batches:
             batch['experimentId'] = experiment_id
