@@ -35,6 +35,10 @@ class Auth:
         password = auth.password
 
         user = self._mongo.db['users'].find_one({'username': username})
+
+        if not user:
+            return None
+
         salt = user['salt']
         del user['salt']
 

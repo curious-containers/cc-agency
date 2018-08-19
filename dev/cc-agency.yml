@@ -1,5 +1,5 @@
 broker:
-  external_url: "http://localhost:6000"
+  external_url: "http://172.17.0.1:6000"
   auth:
     num_login_attempts: 3
     block_for_seconds: 30
@@ -12,6 +12,7 @@ controller:
   docker:
     core_image:
       url: "cc-core"
+      disable_pull: True
     nodes:
       node1:
         base_url: unix://var/run/docker.sock

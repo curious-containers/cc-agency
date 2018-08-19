@@ -40,7 +40,8 @@ conf_schema = {
                                     },
                                     'additionalProperties': False,
                                     'required': ['username', 'password']
-                                }
+                                },
+                                'disable_pull': {'type': 'boolean'}
                             },
                             'additionalProperties': False,
                             'required': ['url']

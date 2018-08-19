@@ -35,23 +35,27 @@ class ClientProxy:
         node = {
             'nodeName': node_name,
             'state': None,
-            'history': []
+            'history': [],
+            'ram': None,
+            'cpus': None
         }
 
         bson_node_id = self._mongo.db['nodes'].insert_one(node).inserted_id
         self._node_id = str(bson_node_id)
 
         try:
-            self._client = docker.APIClient(base_url=self._base_url, tls=self._tls, version='auto')
+            self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
+            ram, cpus = self._info()
+            self._inspect()
         except Exception:
             self._set_offline(format_exc())
             return
 
-        self._set_online()
+        self._set_online(ram, cpus)
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
 
-    def _set_online(self):
+    def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
 
         self._online = True
@@ -59,7 +63,11 @@ class ClientProxy:
         self._mongo.db['nodes'].update_one(
             {'_id': bson_node_id},
             {
-                '$set': {'state': 'online'},
+                '$set': {
+                    'state': 'online',
+                    'ram': ram,
+                    'cpus': cpus
+                },
                 '$push': {
                     'history': {
                         'state': 'online',
@@ -89,17 +97,30 @@ class ClientProxy:
             }
         )
 
+    def _info(self):
+        info = self._client.info()
+        ram = info['MemTotal'] // (1024 * 1024)
+        cpus = info['NCPU']
+        return ram, cpus
+
+    def inspect_offline_node_async(self):
+        if self._online:
+            return
+
+        Thread(target=self.inspect_offline_node).start()
+
     def inspect_offline_node(self):
         if self._online:
             return
 
         try:
-            self._client = docker.APIClient(base_url=self._base_url, tls=self._tls, version='auto')
+            self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
+            ram, cpus = self._info()
             self._inspect()
         except Exception:
             return
 
-        self._set_online()
+        self._set_online(ram, cpus)
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
 
@@ -110,8 +131,11 @@ class ClientProxy:
         image = core_image_conf['url']
         auth = core_image_conf.get('auth')
         command = 'ccagent connected {} --inspect'.format(self._external_url)
+        disable_pull = self._conf.d['controller']['docker']['core_image'].get('disable_pull', False)
 
-        self._client.images.pull(image, auth_config=auth)
+        if not disable_pull:
+            self._client.images.pull(image, auth_config=auth)
+
         self._client.containers.run(
             image,
             command,
@@ -122,7 +146,7 @@ class ClientProxy:
     def _batch_failure(self, batch_id, debug_info):
         pass
 
-    def _image_failure(self, image, debug_info):
+    def _pull_image_failure(self, image, debug_info):
         pass
 
     def _action_loop(self):
@@ -154,7 +178,7 @@ class ClientProxy:
                     self._pull_image(image=data['url'], auth=data.get('auth'))
                 except:
                     inspect = True
-                    self._image_failure(data['url'], format_exc())
+                    self._pull_image_failure(data['url'], format_exc())
 
             if inspect:
                 try:

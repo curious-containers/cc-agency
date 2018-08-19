@@ -10,6 +10,7 @@ from cc_agency.commons.conf import Conf
 from cc_agency.commons.db import Mongo
 from cc_agency.broker.auth import Auth
 from cc_agency.broker.routes.red import red_routes
+from cc_agency.broker.routes.nodes import nodes_routes
 
 DESCRIPTION = 'CC-Agency Broker.'
 
@@ -52,3 +53,4 @@ def get_version():
 
 
 red_routes(app, mongo, auth, controller)
+nodes_routes(app, mongo, auth)
