@@ -6,14 +6,6 @@ from traceback import format_exc
 from bson.objectid import ObjectId
 
 
-class InspectionError(Exception):
-    pass
-
-
-class ClientProxyError(Exception):
-    pass
-
-
 class ClientProxy:
     def __init__(self, node_name, conf, mongo):
         self._node_name = node_name
@@ -143,11 +135,8 @@ class ClientProxy:
             remove=True
         )
 
-    def _batch_failure(self, batch_id, debug_info):
-        pass
-
-    def _pull_image_failure(self, image, debug_info):
-        pass
+    def put_action(self, data):
+        self._action_q.put(data)
 
     def _action_loop(self):
         while True:
@@ -160,12 +149,12 @@ class ClientProxy:
 
             inspect = False
 
-            if action == 'start_batch_container':
+            if action == 'run_batch_container':
                 try:
-                    self._start_batch_container(batch_id=data['batch_id'])
+                    self._run_batch_container(batch_id=data['batch_id'])
                 except Exception:
                     inspect = True
-                    self._batch_failure(data['batch_id'], format_exc())
+                    self._run_batch_container_failure(data['batch_id'], format_exc())
 
             elif action == 'remove_batch_container':
                 try:
@@ -178,7 +167,8 @@ class ClientProxy:
                     self._pull_image(image=data['url'], auth=data.get('auth'))
                 except:
                     inspect = True
-                    self._pull_image_failure(data['url'], format_exc())
+                    batch_ids = data['required_by']
+                    self._pull_image_failure(format_exc(), batch_ids)
 
             if inspect:
                 try:
@@ -191,11 +181,53 @@ class ClientProxy:
             if not self._online:
                 return
 
-    def _start_batch_container(self, batch_id):
+    def _run_batch_container(self, batch_id):
         pass
 
-    def _remove_batch_container(self, batch_id):
+    def _run_batch_container_failure(self, batch_id, debug_info):
         pass
 
     def _pull_image(self, image, auth):
+        self._client.images.pull(image, auth_config=auth)
+
+    def _pull_image_failure(self, debug_info, batch_ids):
+        bson_ids = [ObjectId(_id) for _id in batch_ids]
+        timestamp = time()
+
+        cursor = self._mongo.db['batches'].find(
+            {'_id': {'$in': bson_ids}, 'state': 'processing'},
+            {'attempts': 1, 'node': 1}
+        )
+
+        for batch in cursor:
+            bson_id = batch['_id']
+            attempts = batch['attempts']
+            node = batch['node']
+
+            new_state = 'registered'
+            new_node = None
+
+            if attempts >= self._conf.d['controller']['scheduling']['attempts_to_fail']:
+                new_state = 'failed'
+                new_node = node
+
+            self._mongo.db['batches'].update(
+                {'_id': bson_id},
+                {
+                    '$set': {
+                        'state': new_state,
+                        'node': new_node
+                    },
+                    '$push': {
+                        'history': {
+                            'state': new_state,
+                            'time': timestamp,
+                            'debugInfo': debug_info,
+                            'node': new_node
+                        }
+                    }
+                }
+            )
+
+    def _remove_batch_container(self, batch_id):
         pass

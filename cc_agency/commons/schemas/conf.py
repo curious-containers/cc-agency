@@ -75,10 +75,19 @@ conf_schema = {
                     },
                     'additionalProperties': False,
                     'required': ['nodes']
+                },
+                'scheduling': {
+                    'type': 'object',
+                    'properties': {
+                        'strategy': {'enum': ['spread', 'binpack']},
+                        'attempts_to_fail': {'type': 'integer'}
+                    },
+                    'additionalProperties': False,
+                    'required': ['strategy', 'attempts_to_fail']
                 }
             },
             'additionalProperties': False,
-            'required': ['external_url', 'bind_host', 'bind_port']
+            'required': ['external_url', 'bind_host', 'bind_port', 'docker', 'scheduling']
         },
         'mongo': {
             'type': 'object',

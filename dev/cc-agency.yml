@@ -16,6 +16,9 @@ controller:
     nodes:
       node1:
         base_url: unix://var/run/docker.sock
+  scheduling:
+    strategy: 'spread'
+    attempts_to_fail: 3
 
 mongo:
   db: "ccagency"
