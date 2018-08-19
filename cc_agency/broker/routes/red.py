@@ -42,6 +42,7 @@ def _prepare_red_data(data, user):
             'username': user['username'],
             'registrationTime': timestamp,
             'state': 'registered',
+            'protectedKeysVoided': False,
             'node': None,
             'history': [{
                 'state': 'registered',
@@ -110,6 +111,35 @@ def red_routes(app, mongo, auth, controller):
         controller.send_json({'destination': 'scheduler'})
 
         return jsonify({'experimentId': experiment_id})
+
+    @app.route('/batches/<object_id>', methods=['DELETE'])
+    def delete_batches(object_id):
+        user = auth.verify_user(request.authorization)
+        if not user:
+            raise Unauthorized()
+
+        try:
+            bson_id = ObjectId(object_id)
+        except Exception:
+            raise BadRequest('Not a valid BSON ObjectId.')
+
+        match = {'_id': bson_id}
+        match_with_state = {'_id': bson_id, 'state': {'$nin': ['succeeded', 'failed', 'cancelled']}}
+
+        if not user['is_admin']:
+            match['username'] = user['username']
+            match_with_state['username'] = user['username']
+
+        o = mongo.db['batches'].find_one(match, {'state': 1})
+        if not o:
+            raise NotFound('Could not find Object.')
+
+        mongo.db['batches'].update_one(match_with_state, {'$set': {'state': 'cancelled'}})
+
+        o = mongo.db['batches'].find_one(match)
+        o['_id'] = str(o['_id'])
+
+        return jsonify(o)
 
     @app.route('/red/count', methods=['GET'])
     def get_red_count():
@@ -180,18 +210,44 @@ def red_routes(app, mongo, auth, controller):
 
         skip = request.args.get('skip', default=None, type=int)
         limit = request.args.get('limit', default=None, type=int)
+        node = None
+        experiment_id = None
+        state = None
+
+        if collection == 'batches':
+            node = request.args.get('node', default=None, type=str)
+            state = request.args.get('state', default=None, type=str)
+            experiment_id = request.args.get('experimentId', default=None, type=str)
+
+            if experiment_id:
+                try:
+                    _ = ObjectId(experiment_id)
+                except Exception:
+                    raise BadRequest('Experiment is not a valid BSON ObjectId.')
 
         aggregate = []
 
+        match = {}
         if not user['is_admin']:
-            aggregate.append({'$match': {'username': user['username']}})
+            match = {'username': user['username']}
+
+        if node:
+            match['node'] = node
+
+        if experiment_id:
+            match['experimentId'] = experiment_id
+
+        if state:
+            match['state'] = state
+
+        aggregate.append({'$match': match})
 
         aggregate.append({'$project': {
             'username': 1,
-            'redVersion': 1,
             'registrationTime': 1,
             'state': 1,
-            'experimentId': 1
+            'experimentId': 1,
+            'node': 1
         }})
 
         aggregate.append({'$sort': {'registrationTime': -1}})

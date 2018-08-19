@@ -17,7 +17,10 @@ def nodes_routes(app, mongo, auth):
             del n['_id']
 
             batches_cursor = mongo.db['batches'].find(
-                {'node': n['nodeName']},
+                {
+                    'node': n['nodeName'],
+                    'state': 'processing'
+                },
                 {'experiementId': 1}
             )
             batches = list(batches_cursor)
@@ -32,13 +35,13 @@ def nodes_routes(app, mongo, auth):
 
             batches_ram = [
                 {
-                    'batch_id': str(b['_id']),
+                    'batchId': str(b['_id']),
                     'ram': experiments[b['experimentId']]['container']['settings']['ram']
                 }
                 for b in batches
             ]
 
-            n['batches'] = batches_ram
+            n['currentBatches'] = batches_ram
 
             result.append(n)
 

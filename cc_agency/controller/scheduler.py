@@ -32,12 +32,12 @@ class Scheduler:
             self._scheduling_q.get()
             print('start scheduling')
 
-            # clean broken batches
+            # TODO: void protected keys
+            # TODO: clean broken containers
 
-            # offline node inspection
             for node in self._nodes:
                 node.inspect_offline_node_async()
 
-            # schedule
+            # TODO: schedule
 
             print('end scheduling')
