@@ -1,7 +1,6 @@
 from threading import Thread
 from queue import Queue
 from time import time
-from pprint import pprint
 
 from bson.objectid import ObjectId
 
@@ -86,15 +85,22 @@ class Scheduler:
         strategy = self._conf.d['controller']['scheduling']['strategy']
         timestamp = time()
 
+        experiments = {}
+
         # select batch to be scheduled
         for batch in self._fifo():
             batch_id = str(batch['_id'])
             experiment_id = batch['experimentId']
 
-            experiment = self._mongo.db['experiments'].find_one(
-                {'_id': ObjectId(experiment_id)},
-                {'container.settings': 1, 'execution.settings': 1}
-            )
+            experiment = experiments.get(experiment_id)
+
+            if not experiment:
+                experiment = self._mongo.db['experiments'].find_one(
+                    {'_id': ObjectId(experiment_id)},
+                    {'container.settings': 1, 'execution.settings': 1}
+                )
+                experiments[experiment_id] = experiment
+
             ram = experiment['container']['settings']['ram']
 
             # select node
@@ -144,7 +150,8 @@ class Scheduler:
                             'state': 'processing',
                             'time': timestamp,
                             'debugInfo': None,
-                            'node': selected_node['nodeName']
+                            'node': selected_node['nodeName'],
+                            'ccagent': None
                         }
                     },
                     '$inc': {

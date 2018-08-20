@@ -1,9 +1,13 @@
-import docker
+from os import urandom
 from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
+
+import docker
 from bson.objectid import ObjectId
+
+from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure
 
 
 class ClientProxy:
@@ -38,7 +42,6 @@ class ClientProxy:
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
-            self._inspect()
         except Exception:
             self._set_offline(format_exc())
             return
@@ -93,37 +96,14 @@ class ClientProxy:
         # change state of assigned batches
         cursor = self._mongo.db['batches'].find(
             {'node': self._node_name, 'state': 'processing'},
-            {'attempts': 1}
+            {'_id': 1}
         )
 
         for batch in cursor:
             bson_id = batch['_id']
-            attempts = batch['attempts']
-
-            new_state = 'registered'
-            new_node = None
-
-            if attempts >= self._conf.d['controller']['scheduling']['attempts_to_fail']:
-                new_state = 'failed'
-                new_node = self._node_name
-
-            self._mongo.db['batches'].update(
-                {'_id': bson_id},
-                {
-                    '$set': {
-                        'state': new_state,
-                        'node': new_node
-                    },
-                    '$push': {
-                        'history': {
-                            'state': new_state,
-                            'time': timestamp,
-                            'debugInfo': 'Node offline: {}'.format(self._node_name),
-                            'node': new_node
-                        }
-                    }
-                }
-            )
+            batch_id = str(bson_id)
+            debug_info = 'Node offline: {}'.format(self._node_name)
+            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
     def _info(self):
         info = self._client.info()
@@ -218,7 +198,47 @@ class ClientProxy:
                 return
 
     def _run_batch_container(self, batch_id):
-        pass
+        batch = self._mongo.db['batches'].find_one(
+            {'_id': ObjectId(batch_id), 'state': 'processing'},
+            {'experimentId': 1}
+        )
+        if not batch:
+            print('Batch "{}" not found for processing.'.format(batch_id))
+            return
+
+        experiment_id = batch['experimentId']
+        experiment = self._mongo.db['experiments'].find_one(
+            {'_id': ObjectId(experiment_id)},
+            {'container.settings.image.url': 1, 'execution.settings.outdir': 1}
+        )
+        image = experiment['container']['settings']['image']['url']
+
+        token = generate_secret()
+        salt = urandom(16)
+        kdf = create_kdf(salt)
+
+        self._mongo.db['callback_tokens'].insert_one({
+            'batch_id': batch_id,
+            'salt': salt,
+            'token': kdf.derive(token.encode('utf-8')),
+            'timestamp': time()
+        })
+
+        command = 'ccagent connected {}/callback/{}/{}'.format(self._external_url, batch_id, token)
+
+        if 'execution' in experiment:
+            outdir = experiment['execution']['settings'].get('outdir')
+            if outdir:
+                command = '{} --outdir {}'.format(command, outdir)
+
+        self._client.containers.run(
+            image,
+            command,
+            name=batch_id,
+            user='1000:1000',
+            remove=False,
+            detach=True
+        )
 
     def _run_batch_container_failure(self, batch_id, debug_info):
         pass
@@ -227,43 +247,8 @@ class ClientProxy:
         self._client.images.pull(image, auth_config=auth)
 
     def _pull_image_failure(self, debug_info, batch_ids):
-        bson_ids = [ObjectId(_id) for _id in batch_ids]
-        timestamp = time()
-
-        cursor = self._mongo.db['batches'].find(
-            {'_id': {'$in': bson_ids}, 'state': 'processing'},
-            {'attempts': 1, 'node': 1}
-        )
-
-        for batch in cursor:
-            bson_id = batch['_id']
-            attempts = batch['attempts']
-            node = batch['node']
-
-            new_state = 'registered'
-            new_node = None
-
-            if attempts >= self._conf.d['controller']['scheduling']['attempts_to_fail']:
-                new_state = 'failed'
-                new_node = node
-
-            self._mongo.db['batches'].update(
-                {'_id': bson_id},
-                {
-                    '$set': {
-                        'state': new_state,
-                        'node': new_node
-                    },
-                    '$push': {
-                        'history': {
-                            'state': new_state,
-                            'time': timestamp,
-                            'debugInfo': debug_info,
-                            'node': new_node
-                        }
-                    }
-                }
-            )
+        for batch_id in batch_ids:
+            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
     def _remove_batch_container(self, batch_id):
         pass

@@ -48,7 +48,8 @@ def _prepare_red_data(data, user):
                 'state': 'registered',
                 'time': timestamp,
                 'debugInfo': None,
-                'node': None
+                'node': None,
+                'ccagent': None
             }],
             'attempts': 0,
             'inputs': data['inputs'],
@@ -141,16 +142,16 @@ def red_routes(app, mongo, auth, controller):
 
         return jsonify(o)
 
-    @app.route('/red/count', methods=['GET'])
-    def get_red_count():
+    @app.route('/experiments/count', methods=['GET'])
+    def get_experiments_count():
         return get_collection_count('experiments')
 
-    @app.route('/red', methods=['GET'])
-    def get_red():
+    @app.route('/experiments', methods=['GET'])
+    def get_experiments():
         return get_collection('experiments')
 
-    @app.route('/red/<object_id>', methods=['GET'])
-    def get_red_id(object_id):
+    @app.route('/experiments/<object_id>', methods=['GET'])
+    def get_experiments_id(object_id):
         return get_collection_id('experiments', object_id)
 
     @app.route('/batches/count', methods=['GET'])

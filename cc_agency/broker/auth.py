@@ -1,11 +1,7 @@
 from os import urandom
 from time import time
 
-from cryptography.hazmat.backends import default_backend
-from cryptography.hazmat.primitives.hashes import SHA256
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-
-from cc_agency.commons.helper import generate_secret, get_ip
+from cc_agency.commons.helper import generate_secret, get_ip, create_kdf
 
 
 class Auth:
@@ -18,7 +14,7 @@ class Auth:
 
     def create_user(self, username, password, is_admin):
         salt = urandom(16)
-        kdf = Auth._kdf(salt)
+        kdf = create_kdf(salt)
         user = {
             'username': username,
             'password': kdf.derive(password.encode('utf-8')),
@@ -35,6 +31,7 @@ class Auth:
         password = auth.password
 
         user = self._mongo.db['users'].find_one({'username': username})
+        user['verified_by_credentials'] = False
 
         if not user:
             return None
@@ -52,6 +49,7 @@ class Auth:
             return user
 
         if self._verify_user_by_credentials(user, password, salt):
+            user['verified_by_credentials'] = True
             return user
 
         self._add_block_entry(user)
@@ -75,7 +73,7 @@ class Auth:
 
     def issue_token(self, user):
         salt = urandom(16)
-        kdf = Auth._kdf(salt)
+        kdf = create_kdf(salt)
         token = generate_secret()
         self._mongo.db['tokens'].insert_one({
             'username': user['username'],
@@ -94,7 +92,23 @@ class Auth:
         )
         for c in cursor:
             try:
-                kdf = Auth._kdf(c['salt'])
+                kdf = create_kdf(c['salt'])
+                kdf.verify(token.encode('utf-8'), c['token'])
+                return True
+            except:
+                pass
+
+        return False
+
+    def verify_callback(self, batch_id, token):
+        self._mongo.db['callback_tokens'].delete_many({'timestamp': {'$lt': time() - self._tokens_valid_for_seconds}})
+        cursor = self._mongo.db['callback_tokens'].find(
+            {'batch_id': batch_id},
+            {'token': 1, 'salt': 1}
+        )
+        for c in cursor:
+            try:
+                kdf = create_kdf(c['salt'])
                 kdf.verify(token.encode('utf-8'), c['token'])
                 return True
             except:
@@ -104,20 +118,10 @@ class Auth:
 
     @staticmethod
     def _verify_user_by_credentials(user, password, salt):
-        kdf = Auth._kdf(salt)
+        kdf = create_kdf(salt)
         try:
             kdf.verify(password.encode('utf-8'), user['password'])
         except:
             return False
 
         return True
-
-    @staticmethod
-    def _kdf(salt):
-        return PBKDF2HMAC(
-            algorithm=SHA256(),
-            length=32,
-            salt=salt,
-            iterations=100000,
-            backend=default_backend()
-        )

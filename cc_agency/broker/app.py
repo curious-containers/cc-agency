@@ -11,6 +11,9 @@ from cc_agency.commons.db import Mongo
 from cc_agency.broker.auth import Auth
 from cc_agency.broker.routes.red import red_routes
 from cc_agency.broker.routes.nodes import nodes_routes
+from cc_agency.broker.routes.callback import callback_routes
+from cc_agency.broker.routes.auth import auth_routes
+
 
 DESCRIPTION = 'CC-Agency Broker.'
 
@@ -32,9 +35,6 @@ context = zmq.Context()
 controller = context.socket(zmq.PUSH)
 controller.connect(conf.d['controller']['external_url'])
 
-controller.send_json({'Hello': 'World'})
-
-
 @app.route('/', methods=['GET'])
 def get_root():
     return jsonify({'Hello': 'World'})
@@ -54,3 +54,7 @@ def get_version():
 
 red_routes(app, mongo, auth, controller)
 nodes_routes(app, mongo, auth)
+callback_routes(app, mongo, auth, conf, controller)
+auth_routes(app, auth, conf)
+
+controller.send_json({'destination': 'scheduler'})
