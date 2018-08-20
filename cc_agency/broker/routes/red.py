@@ -24,7 +24,7 @@ def _prepare_red_data(data, user):
     if 'execution' in data:
         stripped_settings = {}
 
-        for key, val in data['execution']['settings']:
+        for key, val in data['execution']['settings'].items():
             if key == 'access':
                 continue
 

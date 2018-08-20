@@ -1,6 +1,7 @@
 from threading import Thread
 from queue import Queue
 from time import time
+from pprint import pprint
 
 from bson.objectid import ObjectId
 
@@ -38,8 +39,8 @@ class Scheduler:
             # TODO: void protected keys
             # TODO: clean broken containers
 
-            for node in self._nodes:
-                node.inspect_offline_node_async()
+            for _, client_proxy in self._nodes.items():
+                client_proxy.inspect_offline_node_async()
 
             self._schedule_batches()
 
@@ -56,14 +57,14 @@ class Scheduler:
 
         cursor = self._mongo.db['batches'].find(
             {'node': {'$in': node_names}, 'state': 'processing'},
-            {'experiementId': 1, 'node': 1}
+            {'experimentId': 1, 'node': 1}
         )
         batches = list(cursor)
         experiment_ids = list(set([ObjectId(b['experimentId']) for b in batches]))
 
         cursor = self._mongo.db['experiments'].find(
             {'_id': {'$in': experiment_ids}},
-            {'container.settings.ram': 1, 'execution.settings.disablePull': 1}
+            {'container.settings.ram': 1}
         )
         experiments = {str(e['_id']): e for e in cursor}
 
@@ -73,21 +74,27 @@ class Scheduler:
                 for b in batches
                 if b['node'] == node['nodeName']
             ])
-            node['freeRam'] = node['ram'] - used_ram,
+
+            node['freeRam'] = node['ram'] - used_ram
             node['scheduledImages'] = {}
             node['scheduledBatches'] = []
 
-        return nodes, experiments
+        return nodes
 
     def _schedule_batches(self):
-        nodes, experiments = self._online_nodes()
+        nodes = self._online_nodes()
         strategy = self._conf.d['controller']['scheduling']['strategy']
         timestamp = time()
 
         # select batch to be scheduled
         for batch in self._fifo():
             batch_id = str(batch['_id'])
-            experiment = experiments[batch['experimentId']]
+            experiment_id = batch['experimentId']
+
+            experiment = self._mongo.db['experiments'].find_one(
+                {'_id': ObjectId(experiment_id)},
+                {'container.settings': 1, 'execution.settings': 1}
+            )
             ram = experiment['container']['settings']['ram']
 
             # select node

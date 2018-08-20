@@ -72,6 +72,7 @@ class ClientProxy:
 
     def _set_offline(self, debug_info):
         print('Node offline:', self._node_name)
+        timestamp = time()
 
         self._online = False
         bson_node_id = ObjectId(self._node_id)
@@ -82,12 +83,47 @@ class ClientProxy:
                 '$push': {
                     'history': {
                         'state': 'offline',
-                        'time': time(),
+                        'time': timestamp,
                         'debugInfo': debug_info
                     }
                 }
             }
         )
+
+        # change state of assigned batches
+        cursor = self._mongo.db['batches'].find(
+            {'node': self._node_name, 'state': 'processing'},
+            {'attempts': 1}
+        )
+
+        for batch in cursor:
+            bson_id = batch['_id']
+            attempts = batch['attempts']
+
+            new_state = 'registered'
+            new_node = None
+
+            if attempts >= self._conf.d['controller']['scheduling']['attempts_to_fail']:
+                new_state = 'failed'
+                new_node = self._node_name
+
+            self._mongo.db['batches'].update(
+                {'_id': bson_id},
+                {
+                    '$set': {
+                        'state': new_state,
+                        'node': new_node
+                    },
+                    '$push': {
+                        'history': {
+                            'state': new_state,
+                            'time': timestamp,
+                            'debugInfo': 'Node offline: {}'.format(self._node_name),
+                            'node': new_node
+                        }
+                    }
+                }
+            )
 
     def _info(self):
         info = self._client.info()

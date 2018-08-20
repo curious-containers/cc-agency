@@ -11,38 +11,33 @@ def nodes_routes(app, mongo, auth):
             raise Unauthorized()
 
         cursor = mongo.db['nodes'].find()
-        result = []
 
-        for n in cursor:
-            del n['_id']
+        nodes = list(cursor)
+        node_names = [node['nodeName'] for node in nodes]
 
-            batches_cursor = mongo.db['batches'].find(
-                {
-                    'node': n['nodeName'],
-                    'state': 'processing'
-                },
-                {'experiementId': 1}
-            )
-            batches = list(batches_cursor)
+        cursor = mongo.db['batches'].find(
+            {'node': {'$in': node_names}, 'state': 'processing'},
+            {'experimentId': 1, 'node': 1}
+        )
+        batches = list(cursor)
+        experiment_ids = list(set([ObjectId(b['experimentId']) for b in batches]))
 
-            experiment_ids = list(set([ObjectId(b['experimentId']) for b in batches]))
-            experiments_cursor = mongo.db['experiments'].find(
-                {'_id': {'$in': experiment_ids}},
-                {'container.settings.ram': 1}
-            )
+        cursor = mongo.db['experiments'].find(
+            {'_id': {'$in': experiment_ids}},
+            {'container.settings.ram': 1}
+        )
+        experiments = {str(e['_id']): e for e in cursor}
 
-            experiments = {str(e['_id']): e for e in experiments_cursor}
-
+        for node in nodes:
             batches_ram = [
                 {
                     'batchId': str(b['_id']),
                     'ram': experiments[b['experimentId']]['container']['settings']['ram']
                 }
                 for b in batches
+                if b['node'] == node['nodeName']
             ]
+            node['currentBatches'] = batches_ram
+            del node['_id']
 
-            n['currentBatches'] = batches_ram
-
-            result.append(n)
-
-        return jsonify(result)
+        return jsonify(nodes)
