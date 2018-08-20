@@ -22,7 +22,6 @@ class Scheduler:
         }
 
         Thread(target=self._scheduling_loop).start()
-        self.schedule()
 
     def schedule(self):
         try:
@@ -35,8 +34,10 @@ class Scheduler:
             self._scheduling_q.get()
             print('start scheduling')
 
+            for _, client_proxy in self._nodes.items():
+                client_proxy.clean_exited_containers()
+
             # TODO: void protected keys
-            # TODO: clean broken containers
 
             for _, client_proxy in self._nodes.items():
                 client_proxy.inspect_offline_node_async()

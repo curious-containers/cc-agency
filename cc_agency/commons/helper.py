@@ -39,7 +39,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
     bson_id = ObjectId(batch_id)
 
     batch = mongo.db['batches'].find_one(
-        {'batch_id': bson_id},
+        {'_id': bson_id},
         {'attempts': 1, 'node': 1}
     )
 

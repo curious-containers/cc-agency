@@ -13,7 +13,7 @@ def attach_args(parser):
     )
     parser.add_argument(
         action='store', type=str, nargs='+', metavar='COLLECTIONS', dest='collections',
-        choices=['experiments', 'batches', 'users', 'tokens', 'block_entries'],
+        choices=['experiments', 'batches', 'users', 'tokens', 'block_entries', 'callback_tokens'],
         help='Collections to be dropped.'
     )
 

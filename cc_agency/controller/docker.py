@@ -3,6 +3,7 @@ from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
+from pprint import pprint
 
 import docker
 from bson.objectid import ObjectId
@@ -111,6 +112,31 @@ class ClientProxy:
         cpus = info['NCPU']
         return ram, cpus
 
+    def clean_exited_containers(self):
+        containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'exited'})
+        batch_containers = {}
+        for c in containers:
+            try:
+                ObjectId(c.name)
+                batch_containers[c.name] = c
+            except:
+                pass
+
+        cursor = self._mongo.db['batches'].find(
+            {'_id': {'$in': [ObjectId(_id) for _id in batch_containers]}},
+            {'state': 1}
+        )
+        for batch in cursor:
+            bson_id = batch['_id']
+            batch_id = str(bson_id)
+
+            c = batch_containers[batch_id]
+            debug_info = c.logs().decode('utf-8')
+            c.remove()
+
+            if batch['state'] not in ['succeeded', 'failed', 'cancelled']:
+                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+
     def inspect_offline_node_async(self):
         if self._online:
             return
@@ -172,12 +198,6 @@ class ClientProxy:
                     inspect = True
                     self._run_batch_container_failure(data['batch_id'], format_exc())
 
-            elif action == 'remove_batch_container':
-                try:
-                    self._remove_batch_container(batch_id=data['batch_id'])
-                except Exception:
-                    pass
-
             elif action == 'pull_image':
                 try:
                     self._pull_image(image=data['url'], auth=data.get('auth'))
@@ -209,7 +229,10 @@ class ClientProxy:
         experiment_id = batch['experimentId']
         experiment = self._mongo.db['experiments'].find_one(
             {'_id': ObjectId(experiment_id)},
-            {'container.settings.image.url': 1, 'execution.settings.outdir': 1}
+            {
+                'container.settings.image.url': 1,
+                'container.settings.ram': 1,
+                'execution.settings.outdir': 1}
         )
         image = experiment['container']['settings']['image']['url']
 
@@ -231,17 +254,22 @@ class ClientProxy:
             if outdir:
                 command = '{} --outdir {}'.format(command, outdir)
 
+        ram = experiment['container']['settings']['ram']
+        mem_limit = '{}m'.format(ram)
+
         self._client.containers.run(
             image,
             command,
             name=batch_id,
             user='1000:1000',
             remove=False,
-            detach=True
+            detach=True,
+            mem_limit=mem_limit,
+            memswap_limit=mem_limit
         )
 
     def _run_batch_container_failure(self, batch_id, debug_info):
-        pass
+        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
     def _pull_image(self, image, auth):
         self._client.images.pull(image, auth_config=auth)

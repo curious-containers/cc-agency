@@ -16,7 +16,7 @@ def callback_routes(app, mongo, auth, conf, controller):
             raise Unauthorized()
 
         batch = mongo.db['batches'].find_one(
-            {'batch_id': ObjectId(batch_id), 'state': 'processing'}
+            {'_id': ObjectId(batch_id), 'state': 'processing'}
         )
         if not batch:
             raise NotFound('Object not found.')
@@ -47,7 +47,7 @@ def callback_routes(app, mongo, auth, conf, controller):
             raise BadRequest('Not a valid BSON ObjectId.')
 
         batch = mongo.db['batches'].find_one(
-            {'batch_id': bson_id, 'state': 'processing'},
+            {'_id': bson_id, 'state': 'processing'},
             {'attempts': 1, 'node': 1}
         )
         if not batch:
@@ -70,7 +70,8 @@ def callback_routes(app, mongo, auth, conf, controller):
         if data['state'] == 'failed':
             debug_info = 'Callback sent state "failed".'
             batch_failure(mongo, batch_id, debug_info, data, conf)
-            return
+
+            return '', 200
 
         mongo.db['batches'].update(
             {'_id': bson_id},
@@ -89,3 +90,7 @@ def callback_routes(app, mongo, auth, conf, controller):
                 }
             }
         )
+
+        controller.send_json({'destination': 'scheduler'})
+
+        return '', 200
