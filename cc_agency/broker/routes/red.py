@@ -109,6 +109,7 @@ def red_routes(app, mongo, auth, controller):
             batch['experimentId'] = experiment_id
 
         mongo.db['batches'].insert_many(batches)
+
         controller.send_json({'destination': 'scheduler'})
 
         return jsonify({'experimentId': experiment_id})
@@ -139,6 +140,8 @@ def red_routes(app, mongo, auth, controller):
 
         o = mongo.db['batches'].find_one(match)
         o['_id'] = str(o['_id'])
+
+        controller.send_json({'destination': 'scheduler'})
 
         return jsonify(o)
 
@@ -193,24 +196,7 @@ def red_routes(app, mongo, auth, controller):
         if not user:
             raise Unauthorized()
 
-        aggregate = []
-
-        if not user['is_admin']:
-            aggregate.append({'$match': {'username': user['username']}})
-
-        aggregate.append({'$count': 'count'})
-
-        cursor = mongo.db[collection].aggregate(aggregate)
-
-        return jsonify(list(cursor)[0])
-
-    def get_collection(collection):
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
-
-        skip = request.args.get('skip', default=None, type=int)
-        limit = request.args.get('limit', default=None, type=int)
+        username = request.args.get('username', default=None, type=str)
         node = None
         experiment_id = None
         state = None
@@ -228,9 +214,62 @@ def red_routes(app, mongo, auth, controller):
 
         aggregate = []
 
-        match = {}
         if not user['is_admin']:
-            match = {'username': user['username']}
+            aggregate.append({'$match': {'username': user['username']}})
+
+        match = {}
+
+        if username:
+            match['username'] = username
+
+        if node:
+            match['node'] = node
+
+        if experiment_id:
+            match['experimentId'] = experiment_id
+
+        if state:
+            match['state'] = state
+
+        aggregate.append({'$match': match})
+        aggregate.append({'$count': 'count'})
+
+        cursor = mongo.db[collection].aggregate(aggregate)
+
+        return jsonify(list(cursor)[0])
+
+    def get_collection(collection):
+        user = auth.verify_user(request.authorization)
+        if not user:
+            raise Unauthorized()
+
+        skip = request.args.get('skip', default=None, type=int)
+        limit = request.args.get('limit', default=None, type=int)
+        username = request.args.get('username', default=None, type=str)
+        node = None
+        experiment_id = None
+        state = None
+
+        if collection == 'batches':
+            node = request.args.get('node', default=None, type=str)
+            state = request.args.get('state', default=None, type=str)
+            experiment_id = request.args.get('experimentId', default=None, type=str)
+
+            if experiment_id:
+                try:
+                    _ = ObjectId(experiment_id)
+                except Exception:
+                    raise BadRequest('Experiment is not a valid BSON ObjectId.')
+
+        aggregate = []
+
+        if not user['is_admin']:
+            aggregate.append({'$match': {'username': user['username']}})
+
+        match = {}
+
+        if username:
+            match['username'] = username
 
         if node:
             match['node'] = node

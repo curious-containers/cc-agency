@@ -32,10 +32,13 @@ class Scheduler:
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
-            print('start scheduling')
+            print('scheduling...')
 
             for _, client_proxy in self._nodes.items():
-                client_proxy.clean_exited_containers()
+                client_proxy.remove_cancelled_containers()
+
+            for _, client_proxy in self._nodes.items():
+                client_proxy.remove_exited_containers()
 
             # TODO: void protected keys
 
@@ -43,8 +46,6 @@ class Scheduler:
                 client_proxy.inspect_offline_node_async()
 
             self._schedule_batches()
-
-            print('end scheduling')
 
     def _online_nodes(self):
         cursor = self._mongo.db['nodes'].find(

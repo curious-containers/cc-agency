@@ -35,6 +35,7 @@ context = zmq.Context()
 controller = context.socket(zmq.PUSH)
 controller.connect(conf.d['controller']['external_url'])
 
+
 @app.route('/', methods=['GET'])
 def get_root():
     return jsonify({'Hello': 'World'})

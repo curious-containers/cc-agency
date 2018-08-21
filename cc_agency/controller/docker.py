@@ -112,7 +112,11 @@ class ClientProxy:
         cpus = info['NCPU']
         return ram, cpus
 
-    def clean_exited_containers(self):
+    def remove_cancelled_containers(self):
+        # TODO
+        pass
+
+    def remove_exited_containers(self):
         containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'exited'})
         batch_containers = {}
         for c in containers:

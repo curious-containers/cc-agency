@@ -10,7 +10,7 @@ description = "CC Agency is part of the Curious Containers project. It connects 
 
 [tool.poetry.dependencies]
 python = "^3.4"
-cc-core = "~5.1"
+cc-core = "~5.2"
 flask = "^1.0"
 jsonschema = "^2.6"
 docker = "^3.4"
