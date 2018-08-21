@@ -113,8 +113,27 @@ class ClientProxy:
         return ram, cpus
 
     def remove_cancelled_containers(self):
-        # TODO
-        pass
+        containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'running'})
+        batch_containers = {}
+        for c in containers:
+            try:
+                ObjectId(c.name)
+                batch_containers[c.name] = c
+            except:
+                pass
+
+        cursor = self._mongo.db['batches'].find(
+            {
+                '_id': {'$in': [ObjectId(_id) for _id in batch_containers]},
+                'state': 'cancelled'
+            }
+        )
+        for batch in cursor:
+            bson_id = batch['_id']
+            batch_id = str(bson_id)
+
+            c = batch_containers[batch_id]
+            c.remove(force=True)
 
     def remove_exited_containers(self):
         containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'exited'})
