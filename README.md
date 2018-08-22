@@ -1,8 +1,8 @@
-# CC Agency
+# CC-Agency
 
-CC Agency is part of the Curious Containers project. It connects to a cluster of docker-engines for the distributed execution of reproducible data-driven experiments defined in RED format.
+CC-Agency is part of the Curious Containers project. It connects to a cluster of docker-engines for the distributed execution of reproducible data-driven experiments defined in RED format.
 
-For more information please refer to the Curious Containers [documentation](https://curious-containers.github.io/).
+For more information please refer to the Curious Containers [documentation](https://www.curious-containers.cc/).
 
 ## Acknowledgements
 

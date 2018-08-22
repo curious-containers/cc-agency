@@ -5,8 +5,8 @@ authors = ["Christoph Jansen <Christoph.Jansen@htw-berlin.de>"]
 license = "AGPL-3.0"
 readme = "README.md"
 repository = "https://github.com/curious-containers/cc-agency"
-homepage = "https://curious-containers.github.io/"
-description = "CC Agency is part of the Curious Containers project. It connects to a cluster of docker-engines for the distributed execution of reproducible data-driven experiments defined in RED format."
+homepage = "https://www.curious-containers.cc/"
+description = "CC-Agency is part of the Curious Containers project. It connects to a cluster of docker-engines for the distributed execution of reproducible data-driven experiments defined in RED format."
 
 [tool.poetry.dependencies]
 python = "^3.4"
