@@ -139,7 +139,7 @@ class Scheduler:
             # clean up online nodes
             cursor = self._mongo.db['nodes'].find(
                 {'state': 'online'},
-                {'nodeName': 1, 'state': 1}
+                {'nodeName': 1}
             )
 
             for node in cursor:
