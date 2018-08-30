@@ -3,7 +3,6 @@ from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
-from pprint import pprint
 
 import docker
 from bson.objectid import ObjectId
@@ -112,9 +111,10 @@ class ClientProxy:
         cpus = info['NCPU']
         return ram, cpus
 
-    def remove_cancelled_containers(self):
-        containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'running'})
+    def _batch_containers(self, status):
+        containers = self._client.containers.list(all=True, limit=-1, filters={'status': status})
         batch_containers = {}
+
         for c in containers:
             try:
                 ObjectId(c.name)
@@ -122,54 +122,60 @@ class ClientProxy:
             except:
                 pass
 
+        return batch_containers
+
+    def _fail_processing_batches_without_running_container(self):
+        running_containers = self._batch_containers('running')
+
+        cursor = self._mongo.db['batches'].find(
+            {'state': 'processing'},
+            {'_id': 1}
+        )
+
+        for batch in cursor:
+            bson_id = batch['_id']
+            batch_id = str(bson_id)
+
+            if batch_id not in running_containers:
+                debug_info = 'No running container assigned.'
+                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+
+    def _remove_cancelled_containers(self):
+        running_containers = self._batch_containers('running')
+
         cursor = self._mongo.db['batches'].find(
             {
-                '_id': {'$in': [ObjectId(_id) for _id in batch_containers]},
+                '_id': {'$in': [ObjectId(_id) for _id in running_containers]},
                 'state': 'cancelled'
-            }
+            },
+            {'_id': 1}
         )
         for batch in cursor:
             bson_id = batch['_id']
             batch_id = str(bson_id)
 
-            c = batch_containers[batch_id]
+            c = running_containers[batch_id]
             c.remove(force=True)
 
-    def remove_exited_containers(self):
-        containers = self._client.containers.list(all=True, limit=-1, filters={'status': 'exited'})
-        batch_containers = {}
-        for c in containers:
-            try:
-                ObjectId(c.name)
-                batch_containers[c.name] = c
-            except:
-                pass
+    def _remove_exited_containers(self):
+        exited_containers = self._batch_containers('exited')
 
         cursor = self._mongo.db['batches'].find(
-            {'_id': {'$in': [ObjectId(_id) for _id in batch_containers]}},
+            {'_id': {'$in': [ObjectId(_id) for _id in exited_containers]}},
             {'state': 1}
         )
         for batch in cursor:
             bson_id = batch['_id']
             batch_id = str(bson_id)
 
-            c = batch_containers[batch_id]
+            c = exited_containers[batch_id]
             debug_info = c.logs().decode('utf-8')
             c.remove()
 
             if batch['state'] not in ['succeeded', 'failed', 'cancelled']:
                 batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
-    def inspect_offline_node_async(self):
-        if self._online:
-            return
-
-        Thread(target=self.inspect_offline_node).start()
-
     def inspect_offline_node(self):
-        if self._online:
-            return
-
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
@@ -228,6 +234,14 @@ class ClientProxy:
                     inspect = True
                     batch_ids = data['required_by']
                     self._pull_image_failure(format_exc(), batch_ids)
+
+            elif action == 'clean_up':
+                try:
+                    self._remove_cancelled_containers()
+                    self._remove_exited_containers()
+                    self._fail_processing_batches_without_running_container()
+                except:
+                    inspect = True
 
             if inspect:
                 try:

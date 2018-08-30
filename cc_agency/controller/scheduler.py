@@ -1,6 +1,6 @@
 from threading import Thread
 from queue import Queue
-from time import time
+from time import time, sleep
 
 from bson.objectid import ObjectId
 
@@ -15,6 +15,8 @@ class Scheduler:
         mongo.db['nodes'].drop()
 
         self._scheduling_q = Queue(maxsize=1)
+        self._inspection_q = Queue(maxsize=1)
+
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo)
             for node_name
@@ -22,6 +24,25 @@ class Scheduler:
         }
 
         Thread(target=self._scheduling_loop).start()
+        Thread(target=self._inspection_loop).start()
+        Thread(target=self._cron).start()
+
+    def _cron(self):
+        while True:
+            batch = self._mongo.db['batches'].find_one(
+                {'state': {'$nin': ['succeeded', 'failed', 'cancelled']}},
+                {'_id': 1}
+            )
+            if batch:
+                self.schedule()
+
+            sleep(60)
+
+    def _inspect(self):
+        try:
+            self._inspection_q.put_nowait(None)
+        except:
+            pass
 
     def schedule(self):
         try:
@@ -29,21 +50,46 @@ class Scheduler:
         except:
             pass
 
+    def _inspection_loop(self):
+        while True:
+            self._inspection_q.get()
+            print('inspecting...')
+
+            cursor = self._mongo.db['nodes'].find(
+                {'state': 'offline'},
+                {'nodeName': 1, 'state': 1}
+            )
+
+            threads = []
+
+            for node in cursor:
+                node_name = node['nodeName']
+                client_proxy = self._nodes[node_name]
+                t = Thread(client_proxy.inspect_offline_node)
+                t.start()
+                threads.append(t)
+
+            for t in threads:
+                t.join()
+
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
             print('scheduling...')
 
-            for _, client_proxy in self._nodes.items():
-                client_proxy.remove_cancelled_containers()
+            self._inspect()
 
-            for _, client_proxy in self._nodes.items():
-                client_proxy.remove_exited_containers()
+            cursor = self._mongo.db['nodes'].find(
+                {'state': 'online'},
+                {'nodeName': 1, 'state': 1}
+            )
+
+            for node in cursor:
+                node_name = node['nodeName']
+                client_proxy = self._nodes[node_name]
+                client_proxy.put_action({'action': 'clean_up'})
 
             # TODO: void protected keys
-
-            for _, client_proxy in self._nodes.items():
-                client_proxy.inspect_offline_node_async()
 
             self._schedule_batches()
 
