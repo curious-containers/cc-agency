@@ -16,6 +16,7 @@ class Scheduler:
 
         self._scheduling_q = Queue(maxsize=1)
         self._inspection_q = Queue(maxsize=1)
+        self._voiding_q = Queue(maxsize=1)
 
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo)
@@ -25,6 +26,7 @@ class Scheduler:
 
         Thread(target=self._scheduling_loop).start()
         Thread(target=self._inspection_loop).start()
+        Thread(target=self._voiding_loop).start()
         Thread(target=self._cron).start()
 
     def _cron(self):
@@ -37,6 +39,12 @@ class Scheduler:
                 self.schedule()
 
             sleep(60)
+
+    def _void(self):
+        try:
+            self._voiding_q.put_nowait(None)
+        except:
+            pass
 
     def _inspect(self):
         try:
@@ -72,13 +80,69 @@ class Scheduler:
             for t in threads:
                 t.join()
 
+    @staticmethod
+    def _void_recursively(data, protected_keys, do_void, access):
+        if isinstance(data, dict):
+            result = {}
+            for key, val in data.items():
+                if access:
+                    if key == 'password' or key in protected_keys:
+                        do_void = True
+                elif key == 'access':
+                    access = True
+
+                result[key] = Scheduler._void_recursively(val, protected_keys, do_void, access)
+            return result
+        elif isinstance(data, list):
+            return [Scheduler._void_recursively(e, protected_keys, do_void, access) for e in data]
+        elif do_void:
+            return 'VOID'
+        return data
+
+    def _voiding_loop(self):
+        while True:
+            self._voiding_q.get()
+            print('voiding...')
+
+            cursor = self._mongo.db['batches'].find(
+                {
+                    'state': {'$in': ['succeeded', 'failed', 'cancelled']},
+                    'protectedKeysVoided': False
+                }
+            )
+
+            for batch in cursor:
+                bson_id = batch['_id']
+                del batch['_id']
+
+                experiment_id = batch['experimentId']
+                experiment = self._mongo.db['experiments'].find(
+                    {'_id': ObjectId(experiment_id)},
+                    {'execution.settings.protectedKeys': 1}
+                )
+
+                protected_keys = []
+                if 'execution' in experiment:
+                    settings = experiment['execution']['settings']
+                    if 'protectedKeys' in settings:
+                        protected_keys = settings['protectedKeys']
+
+                data = Scheduler._void_recursively(batch, protected_keys, False, False)
+                data['protectedKeysVoided'] = True
+                self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
+
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
             print('scheduling...')
 
+            # inspect offline nodes
             self._inspect()
 
+            # void protected keys
+            self._void()
+
+            # clean up online nodes
             cursor = self._mongo.db['nodes'].find(
                 {'state': 'online'},
                 {'nodeName': 1, 'state': 1}
@@ -89,8 +153,7 @@ class Scheduler:
                 client_proxy = self._nodes[node_name]
                 client_proxy.put_action({'action': 'clean_up'})
 
-            # TODO: void protected keys
-
+            # schedule
             self._schedule_batches()
 
     def _online_nodes(self):
