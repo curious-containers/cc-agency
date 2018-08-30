@@ -40,18 +40,6 @@ class Scheduler:
 
             sleep(60)
 
-    def _void(self):
-        try:
-            self._voiding_q.put_nowait(None)
-        except:
-            pass
-
-    def _inspect(self):
-        try:
-            self._inspection_q.put_nowait(None)
-        except:
-            pass
-
     def schedule(self):
         try:
             self._scheduling_q.put_nowait(None)
@@ -137,10 +125,16 @@ class Scheduler:
             print('scheduling...')
 
             # inspect offline nodes
-            self._inspect()
+            try:
+                self._inspection_q.put_nowait(None)
+            except:
+                pass
 
             # void protected keys
-            self._void()
+            try:
+                self._voiding_q.put_nowait(None)
+            except:
+                pass
 
             # clean up online nodes
             cursor = self._mongo.db['nodes'].find(
