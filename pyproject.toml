@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cc-agency"
-version = "5.2.0"
+version = "5.2.1"
 authors = ["Christoph Jansen <Christoph.Jansen@htw-berlin.de>"]
 license = "AGPL-3.0"
 readme = "README.md"

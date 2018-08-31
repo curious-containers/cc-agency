@@ -38,9 +38,17 @@ def _prepare_red_data(data, user):
         }
 
     if 'batches' in data:
-        batches = data['batches']
+        raw_batches = data['batches']
     else:
-        batches = [{
+        raw_batches = [{
+            'inputs': data['inputs'],
+            'outputs': data['outputs']
+        }]
+
+    batches = []
+
+    for rb in raw_batches:
+        batches.append({
             'username': user['username'],
             'registrationTime': timestamp,
             'state': 'registered',
@@ -54,9 +62,9 @@ def _prepare_red_data(data, user):
                 'ccagent': None
             }],
             'attempts': 0,
-            'inputs': data['inputs'],
-            'outputs': data['outputs']
-        }]
+            'inputs': rb['inputs'],
+            'outputs': rb['outputs']
+        })
 
     return experiment, batches
 
@@ -259,7 +267,7 @@ def red_routes(app, mongo, auth, controller):
             state = request.args.get('state', default=None, type=str)
 
             states = ['registered', 'processing', 'succeeded', 'failed', 'cancelled']
-            if state not in states:
+            if state and state not in states:
                 raise BadRequest('Given state is not valid. Must be one of {}.'.format(states))
 
             experiment_id = request.args.get('experimentId', default=None, type=str)

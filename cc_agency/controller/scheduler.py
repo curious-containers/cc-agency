@@ -73,13 +73,13 @@ class Scheduler:
         if isinstance(data, dict):
             result = {}
             for key, val in data.items():
-                if access:
-                    if key == 'password' or key in protected_keys:
-                        do_void = True
+                if access and (key == 'password' or key in protected_keys):
+                    result[key] = Scheduler._void_recursively(val, protected_keys, True, access)
                 elif key == 'access':
-                    access = True
+                    result[key] = Scheduler._void_recursively(val, protected_keys, do_void, True)
+                else:
+                    result[key] = Scheduler._void_recursively(val, protected_keys, do_void, access)
 
-                result[key] = Scheduler._void_recursively(val, protected_keys, do_void, access)
             return result
         elif isinstance(data, list):
             return [Scheduler._void_recursively(e, protected_keys, do_void, access) for e in data]
@@ -104,7 +104,7 @@ class Scheduler:
                 del batch['_id']
 
                 experiment_id = batch['experimentId']
-                experiment = self._mongo.db['experiments'].find(
+                experiment = self._mongo.db['experiments'].find_one(
                     {'_id': ObjectId(experiment_id)},
                     {'execution.settings.protectedKeys': 1}
                 )
@@ -136,6 +136,9 @@ class Scheduler:
             except:
                 pass
 
+            # schedule
+            self._schedule_batches()
+
             # clean up online nodes
             cursor = self._mongo.db['nodes'].find(
                 {'state': 'online'},
@@ -146,9 +149,6 @@ class Scheduler:
                 node_name = node['nodeName']
                 client_proxy = self._nodes[node_name]
                 client_proxy.put_action({'action': 'clean_up'})
-
-            # schedule
-            self._schedule_batches()
 
     def _online_nodes(self):
         cursor = self._mongo.db['nodes'].find(

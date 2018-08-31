@@ -112,8 +112,12 @@ class ClientProxy:
         return ram, cpus
 
     def _batch_containers(self, status):
-        containers = self._client.containers.list(all=True, limit=-1, filters={'status': status})
         batch_containers = {}
+
+        if not self._online:
+            return batch_containers
+
+        containers = self._client.containers.list(all=True, limit=-1, filters={'status': status})
 
         for c in containers:
             try:
@@ -250,6 +254,9 @@ class ClientProxy:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
+                    self._remove_cancelled_containers()
+                    self._remove_exited_containers()
+                    self._fail_processing_batches_without_running_container()
 
             if not self._online:
                 return
