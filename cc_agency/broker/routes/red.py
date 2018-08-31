@@ -257,6 +257,11 @@ def red_routes(app, mongo, auth, controller):
         if collection == 'batches':
             node = request.args.get('node', default=None, type=str)
             state = request.args.get('state', default=None, type=str)
+
+            states = ['registered', 'processing', 'succeeded', 'failed', 'cancelled']
+            if state not in states:
+                raise BadRequest('Given state is not valid. Must be one of {}.'.format(states))
+
             experiment_id = request.args.get('experimentId', default=None, type=str)
 
             if experiment_id:
