@@ -9,6 +9,8 @@ from bson.objectid import ObjectId
 from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
 
+from cc_agency.commons.helper import str_to_bool
+
 
 def _prepare_red_data(data, user):
     timestamp = time()
@@ -246,6 +248,8 @@ def red_routes(app, mongo, auth, controller):
         skip = request.args.get('skip', default=None, type=int)
         limit = request.args.get('limit', default=None, type=int)
         username = request.args.get('username', default=None, type=str)
+        ascending = str_to_bool(request.args.get('ascending', default=None, type=str))
+
         node = None
         experiment_id = None
         state = None
@@ -290,7 +294,7 @@ def red_routes(app, mongo, auth, controller):
             'node': 1
         }})
 
-        aggregate.append({'$sort': {'registrationTime': -1}})
+        aggregate.append({'$sort': {'registrationTime': 1 if ascending else -1}})
 
         if skip is not None:
             if skip < 0:

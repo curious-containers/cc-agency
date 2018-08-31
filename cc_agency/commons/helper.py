@@ -76,3 +76,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
     )
 
 
+def str_to_bool(s):
+    if isinstance(s, str) and s.lower() in ['1', 'true']:
+        return True
+    return False
