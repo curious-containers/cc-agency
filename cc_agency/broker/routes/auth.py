@@ -17,5 +17,5 @@ def auth_routes(app, auth, conf):
         token = auth.issue_token(user)
         return jsonify({
             'token': token,
-            'valid_for_seconds': tokens_valid_for_seconds
+            'validForSeconds': tokens_valid_for_seconds
         })

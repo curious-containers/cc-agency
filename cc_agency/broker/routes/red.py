@@ -8,6 +8,8 @@ from bson.objectid import ObjectId
 
 from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
+from cc_core.commons.templates import inspect_templates_and_secrets
+from cc_core.commons.exceptions import exception_format
 
 from cc_agency.commons.helper import str_to_bool
 
@@ -20,7 +22,8 @@ def _prepare_red_data(data, user):
         'registrationTime': timestamp,
         'redVersion': data['redVersion'],
         'cli': data['cli'],
-        'container': data['container']
+        'container': data['container'],
+        'protectedKeysVoided': False
     }
 
     if 'execution' in data:
@@ -87,6 +90,11 @@ def red_routes(app, mongo, auth, controller):
             raise BadRequest('Given RED data does not comply with jsonschema. '
                              'Consider using the FAICE commandline tools for local validation.')
 
+        try:
+            _, secret_values = inspect_templates_and_secrets(data, None, True)
+        except Exception:
+            raise BadRequest(format_exc())
+
         if 'batches' in data:
             for batch in data['batches']:
                 if 'outputs' not in batch:
@@ -100,7 +108,7 @@ def red_routes(app, mongo, auth, controller):
         try:
             engine_validation(data, 'container', ['docker'])
         except Exception:
-            raise BadRequest(format_exc())
+            raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 
         if 'ram' not in data['container']['settings']:
             raise BadRequest('CC-Agency requires ram to the be defined in container settings.')
@@ -108,7 +116,7 @@ def red_routes(app, mongo, auth, controller):
         try:
             engine_validation(data, 'execution', ['ccagency'], optional=True)
         except Exception:
-            raise BadRequest(format_exc())
+            raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 
         experiment, batches = _prepare_red_data(data, user)
 
@@ -245,8 +253,12 @@ def red_routes(app, mongo, auth, controller):
         aggregate.append({'$count': 'count'})
 
         cursor = mongo.db[collection].aggregate(aggregate)
+        cursor = list(cursor)
+        
+        if not cursor:
+            return jsonify({'count': 0})
 
-        return jsonify(list(cursor)[0])
+        return jsonify(cursor[0])
 
     def get_collection(collection):
         user = auth.verify_user(request.authorization)

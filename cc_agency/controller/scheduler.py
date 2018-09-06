@@ -5,6 +5,8 @@ from time import time, sleep
 from bson.objectid import ObjectId
 
 from cc_agency.controller.docker import ClientProxy
+from cc_agency.commons.helper import create_kdf
+from binascii import hexlify
 
 
 class Scheduler:
@@ -69,22 +71,24 @@ class Scheduler:
                 t.join()
 
     @staticmethod
-    def _void_recursively(data, protected_keys, do_void, access):
+    def _void_recursively(data, allowed_section):
         if isinstance(data, dict):
             result = {}
             for key, val in data.items():
-                if access and (key == 'password' or key in protected_keys):
-                    result[key] = Scheduler._void_recursively(val, protected_keys, True, access)
-                elif key == 'access':
-                    result[key] = Scheduler._void_recursively(val, protected_keys, do_void, True)
+                if allowed_section and (key == 'password' or key.startswith('_')):
+                    kdf = create_kdf('fixedsalt'.encode('utf-8'))
+                    val_hash = kdf.derive(val.encode('utf-8'))
+                    val_hash = hexlify(val_hash).decode('utf-8')
+                    result[key] = '{{' + val_hash[-8:] + '}}'
+                elif key in ['access', 'auth']:
+                    result[key] = Scheduler._void_recursively(val, True)
                 else:
-                    result[key] = Scheduler._void_recursively(val, protected_keys, do_void, access)
+                    result[key] = Scheduler._void_recursively(val, allowed_section)
 
             return result
         elif isinstance(data, list):
-            return [Scheduler._void_recursively(e, protected_keys, do_void, access) for e in data]
-        elif do_void:
-            return 'VOID'
+            return [Scheduler._void_recursively(val, allowed_section) for val in data]
+
         return data
 
     def _voiding_loop(self):
@@ -92,6 +96,7 @@ class Scheduler:
             self._voiding_q.get()
             print('voiding...')
 
+            # batches
             cursor = self._mongo.db['batches'].find(
                 {
                     'state': {'$in': ['succeeded', 'failed', 'cancelled']},
@@ -103,21 +108,44 @@ class Scheduler:
                 bson_id = batch['_id']
                 del batch['_id']
 
-                experiment_id = batch['experimentId']
-                experiment = self._mongo.db['experiments'].find_one(
-                    {'_id': ObjectId(experiment_id)},
-                    {'execution.settings.protectedKeys': 1}
-                )
-
-                protected_keys = []
-                if 'execution' in experiment:
-                    settings = experiment['execution']['settings']
-                    if 'protectedKeys' in settings:
-                        protected_keys = settings['protectedKeys']
-
-                data = Scheduler._void_recursively(batch, protected_keys, False, False)
+                data = Scheduler._void_recursively(batch, False)
                 data['protectedKeysVoided'] = True
                 self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
+
+            # experiments
+            cursor = self._mongo.db['experiments'].find(
+                {
+                    'protectedKeysVoided': False
+                }
+            )
+
+            for experiment in cursor:
+                bson_id = experiment['_id']
+                experiment_id = str(bson_id)
+
+                cursor = self._mongo.db['batches'].aggregate([
+                    {'$match': {'experimentId': experiment_id}},
+                    {'$count': 'count'}
+                ])
+                all_count = list(cursor)[0]['count']
+
+                cursor = self._mongo.db['batches'].aggregate([
+                    {
+                        '$match': {
+                            'experimentId': experiment_id,
+                            'state': {'$in': ['succeeded', 'failed', 'cancelled']}
+                        }
+                    },
+                    {'$count': 'count'}
+                ])
+                cursor = list(cursor)
+                if cursor:
+                    finished_count = cursor[0]['count']
+
+                    if all_count == finished_count:
+                        data = Scheduler._void_recursively(experiment, False)
+                        data['protectedKeysVoided'] = True
+                        self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 
     def _scheduling_loop(self):
         while True:
