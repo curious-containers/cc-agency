@@ -61,7 +61,7 @@ conf_schema = {
                                                     'type': 'array',
                                                     'items': {'type': 'string'}
                                                 },
-                                                'assert_hostname': {'type': 'boolean'}
+                                                'assert_hostname': {'type': ['boolean', 'string']}
                                             },
                                             'additionalProperties': True
                                         }

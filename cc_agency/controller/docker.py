@@ -21,7 +21,7 @@ class ClientProxy:
         self._tls = False
         if 'tls' in node_conf:
             self._tls = docker.tls.TLSConfig(**node_conf['tls'])
-        self._tls = False
+        
         self._external_url = conf.d['broker']['external_url'].rstrip('/')
 
         self._action_q = None
