@@ -21,7 +21,7 @@ class ClientProxy:
         self._tls = False
         if 'tls' in node_conf:
             self._tls = docker.tls.TLSConfig(**node_conf['tls'])
-        
+
         self._external_url = conf.d['broker']['external_url'].rstrip('/')
 
         self._action_q = None
@@ -128,8 +128,8 @@ class ClientProxy:
 
         return batch_containers
 
-    def _fail_processing_batches_without_running_container(self):
-        running_containers = self._batch_containers('running')
+    def _fail_processing_batches_without_assigned_container(self):
+        running_containers = self._batch_containers(None)
 
         cursor = self._mongo.db['batches'].find(
             {'state': 'processing'},
@@ -141,7 +141,7 @@ class ClientProxy:
             batch_id = str(bson_id)
 
             if batch_id not in running_containers:
-                debug_info = 'No running container assigned.'
+                debug_info = 'No container assigned.'
                 batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
     def _remove_cancelled_containers(self):
@@ -243,7 +243,7 @@ class ClientProxy:
                 try:
                     self._remove_cancelled_containers()
                     self._remove_exited_containers()
-                    self._fail_processing_batches_without_running_container()
+                    self._fail_processing_batches_without_assigned_container()
                 except:
                     inspect = True
 
@@ -256,7 +256,7 @@ class ClientProxy:
                     self._client = None
                     self._remove_cancelled_containers()
                     self._remove_exited_containers()
-                    self._fail_processing_batches_without_running_container()
+                    self._fail_processing_batches_without_assigned_container()
 
             if not self._online:
                 return
