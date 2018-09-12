@@ -46,9 +46,10 @@ class ClientProxy:
             self._set_offline(format_exc())
             return
 
-        self._set_online(ram, cpus)
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
+        self._fail_processing_batches_without_assigned_container()
+        self._set_online(ram, cpus)
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
@@ -187,9 +188,10 @@ class ClientProxy:
         except Exception:
             return
 
-        self._set_online(ram, cpus)
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
+        self._fail_processing_batches_without_assigned_container()
+        self._set_online(ram, cpus)
 
     def _inspect(self):
         print('Node inspection:', self._node_name)
@@ -243,7 +245,6 @@ class ClientProxy:
                 try:
                     self._remove_cancelled_containers()
                     self._remove_exited_containers()
-                    self._fail_processing_batches_without_assigned_container()
                 except:
                     inspect = True
 
@@ -254,9 +255,6 @@ class ClientProxy:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
-                    self._remove_cancelled_containers()
-                    self._remove_exited_containers()
-                    self._fail_processing_batches_without_assigned_container()
 
             if not self._online:
                 return
