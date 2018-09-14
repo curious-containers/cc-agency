@@ -129,11 +129,33 @@ class ClientProxy:
 
         return batch_containers
 
+    def _fail_processing_batches_assigned_to_offline_node(self):
+        running_containers = self._batch_containers(None)
+
+        cursor = self._mongo.db['batches'].find(
+            {
+                'node': self._node_name,
+                'state': 'processing'
+            },
+            {'_id': 1}
+        )
+
+        for batch in cursor:
+            bson_id = batch['_id']
+            batch_id = str(bson_id)
+
+            if batch_id not in running_containers:
+                debug_info = 'Node offline.'
+                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+
     def _fail_processing_batches_without_assigned_container(self):
         running_containers = self._batch_containers(None)
 
         cursor = self._mongo.db['batches'].find(
-            {'state': 'processing'},
+            {
+                'node': self._node_name,
+                'state': 'processing'
+            },
             {'_id': 1}
         )
 
@@ -255,6 +277,7 @@ class ClientProxy:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
+                    self._fail_processing_batches_assigned_to_offline_node()
 
             if not self._online:
                 return
@@ -319,6 +342,3 @@ class ClientProxy:
     def _pull_image_failure(self, debug_info, batch_ids):
         for batch_id in batch_ids:
             batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
-
-    def _remove_batch_container(self, batch_id):
-        pass
