@@ -64,6 +64,13 @@ conf_schema = {
                                                 'assert_hostname': {'type': ['boolean', 'string']}
                                             },
                                             'additionalProperties': True
+                                        },
+                                        'environment': {
+                                            'type': 'object',
+                                            'patternProperties': {
+                                                '^[a-zA-Z0-9_-]+$': {'type': 'string'}
+                                            },
+                                            'additionalProperties': False
                                         }
                                     },
                                     'required': ['base_url'],

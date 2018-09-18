@@ -22,6 +22,8 @@ class ClientProxy:
         if 'tls' in node_conf:
             self._tls = docker.tls.TLSConfig(**node_conf['tls'])
 
+        self._environment = node_conf.get('environment')
+
         self._external_url = conf.d['broker']['external_url'].rstrip('/')
 
         self._action_q = None
@@ -231,7 +233,8 @@ class ClientProxy:
             image,
             command,
             user='1000:1000',
-            remove=True
+            remove=True,
+            environment=self._environment
         )
 
     def put_action(self, data):
@@ -330,7 +333,8 @@ class ClientProxy:
             remove=False,
             detach=True,
             mem_limit=mem_limit,
-            memswap_limit=mem_limit
+            memswap_limit=mem_limit,
+            environment=self._environment
         )
 
     def _run_batch_container_failure(self, batch_id, debug_info):
