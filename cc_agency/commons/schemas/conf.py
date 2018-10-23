@@ -71,7 +71,8 @@ conf_schema = {
                                                 '^[a-zA-Z0-9_-]+$': {'type': 'string'}
                                             },
                                             'additionalProperties': False
-                                        }
+                                        },
+                                        'network': {'type': 'string'}
                                     },
                                     'required': ['base_url'],
                                     'additionalProperties': False

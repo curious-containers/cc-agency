@@ -1,3 +1,4 @@
+import sys
 from threading import Thread
 from queue import Queue
 from time import time, sleep
@@ -7,6 +8,8 @@ from bson.objectid import ObjectId
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf
 from binascii import hexlify
+
+from traceback import format_exc
 
 
 class Scheduler:
@@ -51,7 +54,6 @@ class Scheduler:
     def _inspection_loop(self):
         while True:
             self._inspection_q.get()
-            print('inspecting...')
 
             cursor = self._mongo.db['nodes'].find(
                 {'state': 'offline'},
@@ -94,63 +96,64 @@ class Scheduler:
     def _voiding_loop(self):
         while True:
             self._voiding_q.get()
-            print('voiding...')
 
-            # batches
-            cursor = self._mongo.db['batches'].find(
-                {
-                    'state': {'$in': ['succeeded', 'failed', 'cancelled']},
-                    'protectedKeysVoided': False
-                }
-            )
-
-            for batch in cursor:
-                bson_id = batch['_id']
-                del batch['_id']
-
-                data = Scheduler._void_recursively(batch, False)
-                data['protectedKeysVoided'] = True
-                self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
-
-            # experiments
-            cursor = self._mongo.db['experiments'].find(
-                {
-                    'protectedKeysVoided': False
-                }
-            )
-
-            for experiment in cursor:
-                bson_id = experiment['_id']
-                experiment_id = str(bson_id)
-
-                cursor = self._mongo.db['batches'].aggregate([
-                    {'$match': {'experimentId': experiment_id}},
-                    {'$count': 'count'}
-                ])
-                all_count = list(cursor)[0]['count']
-
-                cursor = self._mongo.db['batches'].aggregate([
+            try:
+                # batches
+                cursor = self._mongo.db['batches'].find(
                     {
-                        '$match': {
-                            'experimentId': experiment_id,
-                            'state': {'$in': ['succeeded', 'failed', 'cancelled']}
-                        }
-                    },
-                    {'$count': 'count'}
-                ])
-                cursor = list(cursor)
-                if cursor:
-                    finished_count = cursor[0]['count']
+                        'state': {'$in': ['succeeded', 'failed', 'cancelled']},
+                        'protectedKeysVoided': False
+                    }
+                )
 
-                    if all_count == finished_count:
-                        data = Scheduler._void_recursively(experiment, False)
-                        data['protectedKeysVoided'] = True
-                        self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
+                for batch in cursor:
+                    bson_id = batch['_id']
+                    del batch['_id']
+
+                    data = Scheduler._void_recursively(batch, False)
+                    data['protectedKeysVoided'] = True
+                    self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
+
+                # experiments
+                cursor = self._mongo.db['experiments'].find(
+                    {
+                        'protectedKeysVoided': False
+                    }
+                )
+
+                for experiment in cursor:
+                    bson_id = experiment['_id']
+                    experiment_id = str(bson_id)
+
+                    cursor = self._mongo.db['batches'].aggregate([
+                        {'$match': {'experimentId': experiment_id}},
+                        {'$count': 'count'}
+                    ])
+                    all_count = list(cursor)[0]['count']
+
+                    cursor = self._mongo.db['batches'].aggregate([
+                        {
+                            '$match': {
+                                'experimentId': experiment_id,
+                                'state': {'$in': ['succeeded', 'failed', 'cancelled']}
+                            }
+                        },
+                        {'$count': 'count'}
+                    ])
+                    cursor = list(cursor)
+                    if cursor:
+                        finished_count = cursor[0]['count']
+
+                        if all_count == finished_count:
+                            data = Scheduler._void_recursively(experiment, False)
+                            data['protectedKeysVoided'] = True
+                            self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
+            except Exception:
+                print(format_exc(), file=sys.stderr)
 
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
-            print('scheduling...')
 
             # inspect offline nodes
             try:

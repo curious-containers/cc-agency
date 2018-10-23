@@ -31,10 +31,11 @@ class Auth:
         password = auth.password
 
         user = self._mongo.db['users'].find_one({'username': username})
-        user['verified_by_credentials'] = False
 
         if not user:
             return None
+
+        user['verified_by_credentials'] = False
 
         salt = user['salt']
         del user['salt']
