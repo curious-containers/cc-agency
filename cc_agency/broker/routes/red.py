@@ -106,12 +106,15 @@ def red_routes(app, mongo, auth, controller):
             raise BadRequest('CC-Agency requires outputs to be defined in RED data.')
 
         try:
-            engine_validation(data, 'container', ['docker'])
+            engine_validation(data, 'container', ['docker', 'nvidia-docker'])
         except Exception:
             raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 
         if 'ram' not in data['container']['settings']:
-            raise BadRequest('CC-Agency requires ram to the be defined in container settings.')
+            raise BadRequest('CC-Agency requires \'ram\' to be defined in the container settings.')
+
+        if (data['container']['engine'] == 'nvidia-docker') and ('gpus' not in data['container']['settings']):
+            raise BadRequest('CC-Agency with \'nvidia-docker\' engine requires \'gpus\' to be defined in the container settings.')
 
         try:
             engine_validation(data, 'execution', ['ccagency'], optional=True)

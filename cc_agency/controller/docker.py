@@ -8,6 +8,8 @@ import docker
 from bson.objectid import ObjectId
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure
+from cc_core.commons.engines import engine_to_runtime
+from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 
 class ClientProxy:
@@ -290,7 +292,7 @@ class ClientProxy:
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
             {'_id': ObjectId(batch_id), 'state': 'processing'},
-            {'experimentId': 1}
+            {'experimentId': 1, 'usedGPUs': 1}
         )
         if not batch:
             print('Batch "{}" not found for processing.'.format(batch_id))
@@ -300,10 +302,19 @@ class ClientProxy:
         experiment = self._mongo.db['experiments'].find_one(
             {'_id': ObjectId(experiment_id)},
             {
+                'container.engine': 1,
                 'container.settings.image.url': 1,
                 'container.settings.ram': 1,
                 'execution.settings.outdir': 1}
         )
+        runtime = engine_to_runtime(experiment['container']['engine'])
+
+        # set nvidia gpu environment
+        gpus = batch['usedGPUs']
+        environment = self._environment.copy()
+        if gpus:
+            set_nvidia_environment_variables(environment, gpus)
+
         image = experiment['container']['settings']['image']['url']
 
         token = generate_secret()
@@ -336,7 +347,8 @@ class ClientProxy:
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
-            environment=self._environment,
+            runtime=runtime,
+            environment=environment,
             network=self._network
         )
 

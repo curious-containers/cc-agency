@@ -1,3 +1,6 @@
+from cc_core.commons.schemas.engines.container import MIN_RAM_LIMIT
+
+
 conf_schema = {
     'type': 'object',
     'properties': {
@@ -72,7 +75,26 @@ conf_schema = {
                                             },
                                             'additionalProperties': False
                                         },
-                                        'network': {'type': 'string'}
+                                        'network': {'type': 'string'},
+                                        'hardware': {
+                                            'type': 'object',
+                                            'properties': {
+                                                'gpus': {
+                                                    'type': 'array',
+                                                    'items': {
+                                                        'type': 'object',
+                                                        'properties': {
+                                                            'id': {'type': 'integer', 'minimum': 0},
+                                                            'vram': {'type': 'integer', 'minimum': MIN_RAM_LIMIT},
+                                                        },
+                                                        'additionalProperties': False,
+                                                        'required': ['id']
+                                                    }
+                                                },
+                                                'ram': {'type': 'integer', 'minimum': MIN_RAM_LIMIT}
+                                            },
+                                            'additionalProperties': False
+                                        }
                                     },
                                     'required': ['base_url'],
                                     'additionalProperties': False

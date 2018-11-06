@@ -4,12 +4,12 @@ from queue import Queue
 from time import time, sleep
 
 from bson.objectid import ObjectId
+from binascii import hexlify
+from traceback import format_exc
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf
-from binascii import hexlify
-
-from traceback import format_exc
+from cc_core.commons.gpu_info import GPUDevice, GPURequirement, match_gpus, get_gpu_requirements, InsufficientGPUError
 
 
 class Scheduler:
@@ -181,6 +181,60 @@ class Scheduler:
                 client_proxy = self._nodes[node_name]
                 client_proxy.put_action({'action': 'clean_up'})
 
+    def _get_busy_gpu_ids(batches, node_name):
+        """
+        Returns a list of busy GPUs in the given batches
+
+        :param batches: The batches to analyse given as list of dictionaries.
+                        If GPUs are busy by processing a batch the key 'usedGPUs' should be present.
+                        The value of 'usedGPUs' has to be a list of busy device IDs.
+        :return: A list of GPUDevice-IDs, which are used by the given batches on the given node
+        """
+
+        busy_gpus = []
+        for b in batches:
+            if b['node'] == node_name:
+                batch_gpus = b.get('usedGPUs')
+                if type(batch_gpus) == list:
+                    busy_gpus.extend(batch_gpus)
+
+        return busy_gpus
+
+    def _get_present_gpus(self, node_name):
+        """
+        Returns a list of GPUDevices
+
+        :param node_name: The name of the node
+        :return: A list of GPUDevices, which are representing the GPU Devices present on the specified node
+        """
+
+        result = []
+
+        gpus = self._conf.d['controller']['docker']['nodes'][node_name].get('hardware', {}).get('gpus')
+        if gpus:
+            for gpu in gpus:
+                result.append(GPUDevice(device_id=gpu['id'], vram=gpu['vram']))
+
+        return result
+
+    def _get_available_gpus(self, node, batches):
+        """
+        Returns a list of available GPUs on the given node.
+        Available in this context means, that this device is present on the node and is not busy processing another batch.
+
+        :param node: The node whose available GPUs should be calculated
+        :param batches: The batches currently running
+        :return: A list of available GPUDevices of the specified node
+        """
+
+        node_name = node['nodeName']
+
+        busy_gpu_ids = Scheduler._get_busy_gpu_ids(batches, node_name)
+        present_gpus = self._get_present_gpus(node_name)
+
+        a = [gpu for gpu in present_gpus if gpu.device_id not in busy_gpu_ids]
+        return a
+
     def _online_nodes(self):
         cursor = self._mongo.db['nodes'].find(
             {'state': 'online'},
@@ -210,11 +264,38 @@ class Scheduler:
                 if b['node'] == node['nodeName']
             ])
 
+            available_gpus = self._get_available_gpus(node, batches)
+            if available_gpus:
+                node['availableGPUs'] = available_gpus
+
             node['freeRam'] = node['ram'] - used_ram
             node['scheduledImages'] = {}
             node['scheduledBatches'] = []
 
         return nodes
+
+    def _node_sufficient(node, experiment):
+        """
+        Returns True if the nodes hardware is sufficient for the experiment
+
+        :param node: The node to test
+        :param experiment: A dictionary containing hardware requirements for the experiment
+        :return: True, if the nodes hardware is sufficient for the experiment, otherwise False
+        """
+
+        if node['freeRam'] < experiment['container']['settings']['ram']:
+            return False
+
+        # check gpus
+        available_gpus = node.get('availableGPUs')
+        required_gpus = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
+
+        try:
+            match_gpus(available_gpus, required_gpus)
+        except InsufficientGPUError:
+            return False
+
+        return True
 
     def _schedule_batches(self):
         nodes = self._online_nodes()
@@ -240,7 +321,7 @@ class Scheduler:
             ram = experiment['container']['settings']['ram']
 
             # select node
-            possible_nodes = [node for node in nodes if node['freeRam'] >= ram]
+            possible_nodes = [node for node in nodes if Scheduler._node_sufficient(node, experiment)]
 
             if len(possible_nodes) == 0:
                 continue
@@ -251,7 +332,20 @@ class Scheduler:
                 possible_nodes.sort(reverse=False, key=lambda n: n['freeRam'])
 
             selected_node = possible_nodes[0]
+
+            # calculate ram / gpus
             selected_node['freeRam'] -= ram
+
+            used_gpu_ids = None
+            if "availableGPUs" in selected_node:
+                gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
+                available_gpus = selected_node['availableGPUs']
+                used_gpus = match_gpus(available_gpus, requirements=gpu_requirements)
+
+                used_gpu_ids = []
+                for gpu in used_gpus:
+                    used_gpu_ids.append(gpu.device_id)
+                    available_gpus.remove(gpu)
 
             # schedule image pull on selected node
             disable_pull = False
@@ -279,7 +373,8 @@ class Scheduler:
                 {
                     '$set': {
                         'state': 'processing',
-                        'node': selected_node['nodeName']
+                        'node': selected_node['nodeName'],
+                        'usedGPUs': used_gpu_ids
                     },
                     '$push': {
                         'history': {
