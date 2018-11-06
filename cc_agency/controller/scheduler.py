@@ -9,7 +9,7 @@ from traceback import format_exc
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf
-from cc_core.commons.gpu_info import GPUDevice, GPURequirement, match_gpus, get_gpu_requirements, InsufficientGPUError
+from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
 
 
 class Scheduler:
@@ -181,6 +181,7 @@ class Scheduler:
                 client_proxy = self._nodes[node_name]
                 client_proxy.put_action({'action': 'clean_up'})
 
+    @staticmethod
     def _get_busy_gpu_ids(batches, node_name):
         """
         Returns a list of busy GPUs in the given batches
@@ -274,6 +275,7 @@ class Scheduler:
 
         return nodes
 
+    @staticmethod
     def _node_sufficient(node, experiment):
         """
         Returns True if the nodes hardware is sufficient for the experiment
