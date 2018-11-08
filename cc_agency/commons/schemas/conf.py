@@ -90,8 +90,7 @@ conf_schema = {
                                                         'additionalProperties': False,
                                                         'required': ['id']
                                                     }
-                                                },
-                                                'ram': {'type': 'integer', 'minimum': MIN_RAM_LIMIT}
+                                                }
                                             },
                                             'additionalProperties': False
                                         }
