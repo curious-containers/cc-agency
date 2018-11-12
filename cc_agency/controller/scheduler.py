@@ -65,7 +65,7 @@ class Scheduler:
             for node in cursor:
                 node_name = node['nodeName']
                 client_proxy = self._nodes[node_name]
-                t = Thread(client_proxy.inspect_offline_node)
+                t = Thread(target=client_proxy.inspect_offline_node)
                 t.start()
                 threads.append(t)
 
@@ -233,8 +233,7 @@ class Scheduler:
         busy_gpu_ids = Scheduler._get_busy_gpu_ids(batches, node_name)
         present_gpus = self._get_present_gpus(node_name)
 
-        a = [gpu for gpu in present_gpus if gpu.device_id not in busy_gpu_ids]
-        return a
+        return [gpu for gpu in present_gpus if gpu.device_id not in busy_gpu_ids]
 
     def _online_nodes(self):
         cursor = self._mongo.db['nodes'].find(
