@@ -18,6 +18,7 @@ pyzmq = "^17.0"
 "ruamel.yaml" = "^0.15"
 pymongo = "^3.7"
 cryptography = "^2.2"
+requests = "^2.18"
 
 [tool.poetry.dev-dependencies]
 

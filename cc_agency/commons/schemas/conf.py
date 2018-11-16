@@ -113,6 +113,26 @@ conf_schema = {
                     },
                     'additionalProperties': False,
                     'required': ['strategy', 'attempts_to_fail']
+                },
+                'notification_hooks': {
+                    'type': 'array',
+                    'items': {
+                        'type': 'object',
+                        'properties': {
+                            'url': {'type': 'string'},
+                            'auth': {
+                                'type': 'object',
+                                'properties': {
+                                    'username': {'type': 'string'},
+                                    'password': {'type': 'string'}
+                                },
+                                'additionalProperties': False,
+                                'required': ['username', 'password']
+                            }
+                        },
+                        'additionalProperties': False,
+                        'required': ['url']
+                    }
                 }
             },
             'additionalProperties': False,

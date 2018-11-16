@@ -56,6 +56,7 @@ def _prepare_red_data(data, user):
             'registrationTime': timestamp,
             'state': 'registered',
             'protectedKeysVoided': False,
+            'notificationsSent': False,
             'node': None,
             'history': [{
                 'state': 'registered',

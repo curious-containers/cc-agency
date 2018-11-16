@@ -1,11 +1,12 @@
 import sys
 from threading import Thread
-from queue import Queue
+from queue import Queue, Full
 from time import time, sleep
-
-from bson.objectid import ObjectId
 from binascii import hexlify
 from traceback import format_exc
+
+import requests
+from bson.objectid import ObjectId
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf
@@ -22,6 +23,7 @@ class Scheduler:
         self._scheduling_q = Queue(maxsize=1)
         self._inspection_q = Queue(maxsize=1)
         self._voiding_q = Queue(maxsize=1)
+        self._notification_q = Queue(maxsize=1)
 
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo)
@@ -32,6 +34,7 @@ class Scheduler:
         Thread(target=self._scheduling_loop).start()
         Thread(target=self._inspection_loop).start()
         Thread(target=self._voiding_loop).start()
+        Thread(target=self._notification_loop).start()
         Thread(target=self._cron).start()
 
     def _cron(self):
@@ -93,63 +96,104 @@ class Scheduler:
 
         return data
 
+    def _notification_loop(self):
+        while True:
+            self._notification_q.get()
+
+            # batches
+            cursor = self._mongo.db['batches'].find(
+                {
+                    'state': {'$in': ['succeeded', 'failed', 'cancelled']},
+                    'notificationsSent': False
+                },
+                {'state': 1}
+            )
+
+            bson_ids = []
+            payload = {'batches': []}
+
+            for batch in cursor:
+                bson_id = batch['_id']
+                bson_ids.append(bson_id)
+
+                payload['batches'].append({
+                    'batchId': str(bson_id),
+                    'state': batch['state']
+                })
+
+            self._mongo.db['batches'].update(
+                {'_id': {'$in': bson_ids}},
+                {'$set': {'notificationsSent': True}}
+            )
+
+            notification_hooks = self._conf.d['controller'].get('notification_hooks', [])
+
+            for hook in notification_hooks:
+                auth = hook.get('auth')
+
+                if auth is not None:
+                    auth = (auth['username'], auth['password'])
+
+                try:
+                    r = requests.post(hook['url'], auth=auth, json=payload)
+                    r.raise_for_status()
+                except Exception:
+                    print(format_exc(), file=sys.stderr)
+
     def _voiding_loop(self):
         while True:
             self._voiding_q.get()
 
-            try:
-                # batches
-                cursor = self._mongo.db['batches'].find(
+            # batches
+            cursor = self._mongo.db['batches'].find(
+                {
+                    'state': {'$in': ['succeeded', 'failed', 'cancelled']},
+                    'protectedKeysVoided': False
+                }
+            )
+
+            for batch in cursor:
+                bson_id = batch['_id']
+                del batch['_id']
+
+                data = Scheduler._void_recursively(batch, False)
+                data['protectedKeysVoided'] = True
+                self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
+
+            # experiments
+            cursor = self._mongo.db['experiments'].find(
+                {
+                    'protectedKeysVoided': False
+                }
+            )
+
+            for experiment in cursor:
+                bson_id = experiment['_id']
+                experiment_id = str(bson_id)
+
+                cursor = self._mongo.db['batches'].aggregate([
+                    {'$match': {'experimentId': experiment_id}},
+                    {'$count': 'count'}
+                ])
+                all_count = list(cursor)[0]['count']
+
+                cursor = self._mongo.db['batches'].aggregate([
                     {
-                        'state': {'$in': ['succeeded', 'failed', 'cancelled']},
-                        'protectedKeysVoided': False
-                    }
-                )
+                        '$match': {
+                            'experimentId': experiment_id,
+                            'state': {'$in': ['succeeded', 'failed', 'cancelled']}
+                        }
+                    },
+                    {'$count': 'count'}
+                ])
+                cursor = list(cursor)
+                if cursor:
+                    finished_count = cursor[0]['count']
 
-                for batch in cursor:
-                    bson_id = batch['_id']
-                    del batch['_id']
-
-                    data = Scheduler._void_recursively(batch, False)
-                    data['protectedKeysVoided'] = True
-                    self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
-
-                # experiments
-                cursor = self._mongo.db['experiments'].find(
-                    {
-                        'protectedKeysVoided': False
-                    }
-                )
-
-                for experiment in cursor:
-                    bson_id = experiment['_id']
-                    experiment_id = str(bson_id)
-
-                    cursor = self._mongo.db['batches'].aggregate([
-                        {'$match': {'experimentId': experiment_id}},
-                        {'$count': 'count'}
-                    ])
-                    all_count = list(cursor)[0]['count']
-
-                    cursor = self._mongo.db['batches'].aggregate([
-                        {
-                            '$match': {
-                                'experimentId': experiment_id,
-                                'state': {'$in': ['succeeded', 'failed', 'cancelled']}
-                            }
-                        },
-                        {'$count': 'count'}
-                    ])
-                    cursor = list(cursor)
-                    if cursor:
-                        finished_count = cursor[0]['count']
-
-                        if all_count == finished_count:
-                            data = Scheduler._void_recursively(experiment, False)
-                            data['protectedKeysVoided'] = True
-                            self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
-            except Exception:
-                print(format_exc(), file=sys.stderr)
+                    if all_count == finished_count:
+                        data = Scheduler._void_recursively(experiment, False)
+                        data['protectedKeysVoided'] = True
+                        self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 
     def _scheduling_loop(self):
         while True:
@@ -158,13 +202,19 @@ class Scheduler:
             # inspect offline nodes
             try:
                 self._inspection_q.put_nowait(None)
-            except:
+            except Full:
                 pass
 
             # void protected keys
             try:
                 self._voiding_q.put_nowait(None)
-            except:
+            except Full:
+                pass
+
+            # send notifications
+            try:
+                self._notification_q.put_nowait(None)
+            except Full:
                 pass
 
             # schedule
