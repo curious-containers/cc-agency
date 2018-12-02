@@ -195,6 +195,17 @@ class Scheduler:
                         data['protectedKeysVoided'] = True
                         self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 
+    def _clean_up_online_nodes(self):
+        cursor = self._mongo.db['nodes'].find(
+            {'state': 'online'},
+            {'nodeName': 1}
+        )
+
+        for node in cursor:
+            node_name = node['nodeName']
+            client_proxy = self._nodes[node_name]
+            client_proxy.put_action({'action': 'clean_up'})
+
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
@@ -217,19 +228,9 @@ class Scheduler:
             except Full:
                 pass
 
-            # schedule
+            self._clean_up_online_nodes()
             self._schedule_batches()
-
-            # clean up online nodes
-            cursor = self._mongo.db['nodes'].find(
-                {'state': 'online'},
-                {'nodeName': 1}
-            )
-
-            for node in cursor:
-                node_name = node['nodeName']
-                client_proxy = self._nodes[node_name]
-                client_proxy.put_action({'action': 'clean_up'})
+            self._clean_up_online_nodes()
 
     @staticmethod
     def _get_busy_gpu_ids(batches, node_name):
