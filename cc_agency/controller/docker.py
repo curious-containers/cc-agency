@@ -338,6 +338,12 @@ class ClientProxy:
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
 
+        # delete potentially dangling container from previous attempt
+        exited_containers = self._batch_containers('exited')
+        if batch_id in exited_containers:
+            c = exited_containers[batch_id]
+            c.remove()
+
         self._client.containers.run(
             image,
             command,

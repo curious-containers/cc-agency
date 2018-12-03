@@ -228,7 +228,6 @@ class Scheduler:
             except Full:
                 pass
 
-            self._clean_up_online_nodes()
             self._schedule_batches()
             self._clean_up_online_nodes()
 
