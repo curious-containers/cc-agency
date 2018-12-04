@@ -16,7 +16,10 @@ def nodes_routes(app, mongo, auth):
         node_names = [node['nodeName'] for node in nodes]
 
         cursor = mongo.db['batches'].find(
-            {'node': {'$in': node_names}, 'state': 'processing'},
+            {
+                'node': {'$in': node_names},
+                'state': {'$in': ['scheduled', 'processing']}
+            },
             {'experimentId': 1, 'node': 1}
         )
         batches = list(cursor)

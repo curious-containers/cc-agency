@@ -47,13 +47,13 @@ class ClientProxy:
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
+            self._fail_batches_without_assigned_container()  # in case of agency restart
         except Exception:
             self._set_offline(format_exc())
             return
 
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
-        self._fail_processing_batches_without_assigned_container()
         self._set_online(ram, cpus)
 
     def _set_online(self, ram, cpus):
@@ -101,7 +101,10 @@ class ClientProxy:
 
         # change state of assigned batches
         cursor = self._mongo.db['batches'].find(
-            {'node': self._node_name, 'state': 'processing'},
+            {
+                'node': self._node_name,
+                'state': {'$in': ['scheduled', 'processing']}
+            },
             {'_id': 1}
         )
 
@@ -134,13 +137,13 @@ class ClientProxy:
 
         return batch_containers
 
-    def _fail_processing_batches_assigned_to_offline_node(self):
-        running_containers = self._batch_containers(None)
+    def _fail_batches_without_assigned_container(self):
+        containers = self._batch_containers(None)
 
         cursor = self._mongo.db['batches'].find(
             {
                 'node': self._node_name,
-                'state': 'processing'
+                'state': {'$in': ['scheduled', 'processing']}
             },
             {'_id': 1}
         )
@@ -149,26 +152,7 @@ class ClientProxy:
             bson_id = batch['_id']
             batch_id = str(bson_id)
 
-            if batch_id not in running_containers:
-                debug_info = 'Node offline.'
-                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
-
-    def _fail_processing_batches_without_assigned_container(self):
-        running_containers = self._batch_containers(None)
-
-        cursor = self._mongo.db['batches'].find(
-            {
-                'node': self._node_name,
-                'state': 'processing'
-            },
-            {'_id': 1}
-        )
-
-        for batch in cursor:
-            bson_id = batch['_id']
-            batch_id = str(bson_id)
-
-            if batch_id not in running_containers:
+            if batch_id not in containers:
                 debug_info = 'No container assigned.'
                 batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
@@ -204,7 +188,7 @@ class ClientProxy:
             debug_info = c.logs().decode('utf-8')
             c.remove()
 
-            if batch['state'] not in ['succeeded', 'failed', 'cancelled']:
+            if batch['state'] == 'processing':
                 batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
 
     def inspect_offline_node(self):
@@ -217,7 +201,6 @@ class ClientProxy:
 
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
-        self._fail_processing_batches_without_assigned_container()
         self._set_online(ram, cpus)
 
     def _inspect(self):
@@ -284,18 +267,17 @@ class ClientProxy:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
-                    self._fail_processing_batches_assigned_to_offline_node()
 
             if not self._online:
                 return
 
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
-            {'_id': ObjectId(batch_id), 'state': 'processing'},
+            {'_id': ObjectId(batch_id), 'state': 'scheduled'},
             {'experimentId': 1, 'usedGPUs': 1}
         )
         if not batch:
-            print('Batch "{}" not found for processing.'.format(batch_id))
+            print('Batch "{}" is not scheduled.'.format(batch_id))
             return
 
         experiment_id = batch['experimentId']
@@ -338,11 +320,23 @@ class ClientProxy:
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
 
-        # delete potentially dangling container from previous attempt
-        exited_containers = self._batch_containers('exited')
-        if batch_id in exited_containers:
-            c = exited_containers[batch_id]
-            c.remove()
+        self._mongo.db['batches'].update_one(
+            {'_id': batch['_id']},
+            {
+                '$set': {
+                    'state': 'processing',
+                },
+                '$push': {
+                    'history': {
+                        'state': 'processing',
+                        'time': time(),
+                        'debugInfo': None,
+                        'node': self._node_name,
+                        'ccagent': None
+                    }
+                }
+            }
+        )
 
         self._client.containers.run(
             image,

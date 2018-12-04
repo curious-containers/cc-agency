@@ -195,17 +195,6 @@ class Scheduler:
                         data['protectedKeysVoided'] = True
                         self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 
-    def _clean_up_online_nodes(self):
-        cursor = self._mongo.db['nodes'].find(
-            {'state': 'online'},
-            {'nodeName': 1}
-        )
-
-        for node in cursor:
-            node_name = node['nodeName']
-            client_proxy = self._nodes[node_name]
-            client_proxy.put_action({'action': 'clean_up'})
-
     def _scheduling_loop(self):
         while True:
             self._scheduling_q.get()
@@ -229,7 +218,6 @@ class Scheduler:
                 pass
 
             self._schedule_batches()
-            self._clean_up_online_nodes()
 
     @staticmethod
     def _get_busy_gpu_ids(batches, node_name):
@@ -237,7 +225,7 @@ class Scheduler:
         Returns a list of busy GPUs in the given batches
 
         :param batches: The batches to analyse given as list of dictionaries.
-                        If GPUs are busy by processing a batch the key 'usedGPUs' should be present.
+                        If GPUs are busy by a current batch the key 'usedGPUs' should be present.
                         The value of 'usedGPUs' has to be a list of busy device IDs.
         :return: A list of GPUDevice-IDs, which are used by the given batches on the given node
         """
@@ -271,7 +259,7 @@ class Scheduler:
     def _get_available_gpus(self, node, batches):
         """
         Returns a list of available GPUs on the given node.
-        Available in this context means, that this device is present on the node and is not busy processing another batch.
+        Available in this context means, that this device is present on the node and is not busy with another batch.
 
         :param node: The node whose available GPUs should be calculated
         :param batches: The batches currently running
@@ -295,7 +283,9 @@ class Scheduler:
         node_names = [node['nodeName'] for node in nodes]
 
         cursor = self._mongo.db['batches'].find(
-            {'node': {'$in': node_names}, 'state': 'processing'},
+            {
+                'node': {'$in': node_names},
+                'state': {'$in': ['scheduled', 'processing']}},
             {'experimentId': 1, 'node': 1}
         )
         batches = list(cursor)
@@ -423,13 +413,13 @@ class Scheduler:
                 {'_id': batch['_id']},
                 {
                     '$set': {
-                        'state': 'processing',
+                        'state': 'scheduled',
                         'node': selected_node['nodeName'],
                         'usedGPUs': used_gpu_ids
                     },
                     '$push': {
                         'history': {
-                            'state': 'processing',
+                            'state': 'scheduled',
                             'time': timestamp,
                             'debugInfo': None,
                             'node': selected_node['nodeName'],
@@ -446,6 +436,7 @@ class Scheduler:
         for node in nodes:
             node_name = node['nodeName']
             client_proxy = self._nodes[node_name]
+            client_proxy.put_action({'action': 'clean_up'})
 
             for image, required_by in node['scheduledImages'].items():
                 data = {
