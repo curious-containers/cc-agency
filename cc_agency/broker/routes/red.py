@@ -92,7 +92,7 @@ def red_routes(app, mongo, auth, controller):
                              'Consider using the FAICE commandline tools for local validation.')
 
         try:
-            _, secret_values = inspect_templates_and_secrets(data, None, True)
+            _, secret_values, _ = inspect_templates_and_secrets(data, None, True)
         except Exception:
             raise BadRequest(format_exc())
 
