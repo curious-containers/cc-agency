@@ -40,7 +40,11 @@ class Scheduler:
     def _cron(self):
         while True:
             batch = self._mongo.db['batches'].find_one(
-                {'state': {'$nin': ['succeeded', 'failed', 'cancelled']}},
+                {'$or': [
+                    {'state': {'$nin': ['succeeded', 'failed', 'cancelled']}},
+                    {'protectedKeysVoided': False},
+                    {'notificationsSent': False}
+                ]},
                 {'_id': 1}
             )
             if batch:
