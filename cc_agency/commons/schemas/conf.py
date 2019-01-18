@@ -31,24 +31,6 @@ conf_schema = {
                 'docker': {
                     'type': 'object',
                     'properties': {
-                        'core_image': {
-                            'type': 'object',
-                            'properties': {
-                                'url': {'type': 'string'},
-                                'auth': {
-                                    'type': 'object',
-                                    'properties': {
-                                        'username': {'type': 'string'},
-                                        'password': {'type': 'string'}
-                                    },
-                                    'additionalProperties': False,
-                                    'required': ['username', 'password']
-                                },
-                                'disable_pull': {'type': 'boolean'}
-                            },
-                            'additionalProperties': False,
-                            'required': ['url']
-                        },
                         'nodes': {
                             'type': 'object',
                             'patternProperties': {
