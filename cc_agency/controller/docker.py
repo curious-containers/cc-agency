@@ -1,15 +1,20 @@
-from os import urandom
+import os
+import shutil
 from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
+import tempfile
 
 import docker
 from bson.objectid import ObjectId
 
-from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
+from cc_core.commons.mnt_core import MOD_DIR, PYMOD_DIR, LIB_DIR, CC_DIR
+
+from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure
+from cc_agency.commons.mnt_core import init_build_dir, create_core_image_dockerfile, CC_CORE_IMAGE
 
 
 class ClientProxy:
@@ -33,6 +38,8 @@ class ClientProxy:
         self._client = None
         self._online = None
 
+        self._cc_core_volume = None
+
         node = {
             'nodeName': node_name,
             'state': None,
@@ -55,6 +62,7 @@ class ClientProxy:
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
         self._set_online(ram, cpus)
+        self._action_q.put({'action': 'inspect'})
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
@@ -78,6 +86,7 @@ class ClientProxy:
                 }
             }
         )
+        self._action_q.put({'action': 'init_cc_core'})
 
     def _set_offline(self, debug_info):
         print('Node offline:', self._node_name)
@@ -206,17 +215,31 @@ class ClientProxy:
     def _inspect(self):
         print('Node inspection:', self._node_name)
 
-        core_image_conf = self._conf.d['controller']['docker']['core_image']
-        image = core_image_conf['url']
-        auth = core_image_conf.get('auth')
-        command = 'ccagent connected {} --inspect'.format(self._external_url)
-        disable_pull = self._conf.d['controller']['docker']['core_image'].get('disable_pull', False)
+        command = [
+            'LD_LIBRARY_PATH_BAK=${LD_LIBRARY_PATH}',
+            'PYTHONPATH_BAK=${PYTHONPATH}',
+            'PYTHONHOME_BAK=${PYTHONHOME}',
+            'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
+            'PYTHONPATH={}:{}:{}'.format(
+                os.path.join('/', PYMOD_DIR),
+                os.path.join('/', PYMOD_DIR, 'lib-dynload'),
+                os.path.join('/', MOD_DIR)
+            ),
+            'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
+            os.path.join('/', LIB_DIR, 'ld.so'),
+            os.path.join('/', LIB_DIR, 'python'),
+            '-m',
+            'cc_core.agent',
+            'connected',
+            self._external_url,
+            '--inspect'
+        ]
 
-        if not disable_pull:
-            self._client.images.pull(image, auth_config=auth)
+        command = ' '.join([str(c) for c in command])
+        command = "/bin/sh -c '{}'".format(command)
 
         self._client.containers.run(
-            image,
+            CC_CORE_IMAGE,
             command,
             user='1000:1000',
             remove=True,
@@ -238,7 +261,10 @@ class ClientProxy:
 
             inspect = False
 
-            if action == 'run_batch_container':
+            if action == 'inspect':
+                inspect = True
+
+            elif action == 'run_batch_container':
                 try:
                     self._run_batch_container(batch_id=data['batch_id'])
                 except Exception:
@@ -261,15 +287,47 @@ class ClientProxy:
                     inspect = True
 
             if inspect:
+                build_dir = tempfile.mkdtemp()
                 try:
+                    if self._cc_core_volume is None:
+                        build_dir = tempfile.mkdtemp()
+                        self._init_cc_core(build_dir)
                     self._inspect()
                 except Exception:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
+                finally:
+                    shutil.rmtree(build_dir)
 
             if not self._online:
                 return
+
+    def _init_cc_core(self, build_dir):
+        init_build_dir(build_dir)
+        create_core_image_dockerfile(build_dir)
+        self._client.images.build(path=build_dir, tag='cc-core')
+        self._client.volumes.prune()
+        volume = self._client.volumes.create()
+
+        binds = {
+            volume.name: {
+                'bind': os.path.join('/vol'),
+                'mode': 'rw'
+            }
+        }
+
+        command = 'cp -R {} /vol'.format(os.path.join('/', CC_DIR, '*'))
+        command = "/bin/sh -c '{}'".format(command)
+
+        self._client.containers.run(
+            CC_CORE_IMAGE,
+            command,
+            remove=True,
+            volumes=binds
+        )
+
+        self._cc_core_volume = volume.name
 
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
@@ -277,7 +335,6 @@ class ClientProxy:
             {'experimentId': 1, 'usedGPUs': 1}
         )
         if not batch:
-            print('Batch "{}" is not scheduled.'.format(batch_id))
             return
 
         experiment_id = batch['experimentId']
@@ -286,21 +343,23 @@ class ClientProxy:
             {
                 'container.engine': 1,
                 'container.settings.image.url': 1,
-                'container.settings.ram': 1,
-                'execution.settings.outdir': 1}
+                'container.settings.ram': 1
+            }
         )
         runtime = engine_to_runtime(experiment['container']['engine'])
 
         # set nvidia gpu environment
         gpus = batch['usedGPUs']
-        environment = self._environment.copy()
+        environment = {}
+        if self._environment:
+            environment = self._environment.copy()
         if gpus:
             set_nvidia_environment_variables(environment, gpus)
 
         image = experiment['container']['settings']['image']['url']
 
         token = generate_secret()
-        salt = urandom(16)
+        salt = os.urandom(16)
         kdf = create_kdf(salt)
 
         self._mongo.db['callback_tokens'].insert_one({
@@ -310,15 +369,37 @@ class ClientProxy:
             'timestamp': time()
         })
 
-        command = 'ccagent connected {}/callback/{}/{}'.format(self._external_url, batch_id, token)
+        command = [
+            'LD_LIBRARY_PATH_BAK=${LD_LIBRARY_PATH}',
+            'PYTHONPATH_BAK=${PYTHONPATH}',
+            'PYTHONHOME_BAK=${PYTHONHOME}',
+            'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
+            'PYTHONPATH={}:{}:{}'.format(
+                os.path.join('/', PYMOD_DIR),
+                os.path.join('/', PYMOD_DIR, 'lib-dynload'),
+                os.path.join('/', MOD_DIR)
+            ),
+            'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
+            os.path.join('/', LIB_DIR, 'ld.so'),
+            os.path.join('/', LIB_DIR, 'python'),
+            '-m',
+            'cc_core.agent',
+            'connected',
+            '{}/callback/{}/{}'.format(self._external_url, batch_id, token)
+        ]
 
-        if 'execution' in experiment:
-            outdir = experiment['execution']['settings'].get('outdir')
-            if outdir:
-                command = '{} --outdir {}'.format(command, outdir)
+        command = ' '.join([str(c) for c in command])
+        command = "/bin/sh -c '{}'".format(command)
 
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
+
+        binds = {
+            self._cc_core_volume: {
+                'bind': os.path.join('/cc'),
+                'mode': 'ro'
+            }
+        }
 
         self._mongo.db['batches'].update_one(
             {'_id': batch['_id']},
@@ -349,7 +430,8 @@ class ClientProxy:
             memswap_limit=mem_limit,
             runtime=runtime,
             environment=environment,
-            network=self._network
+            network=self._network,
+            volumes=binds
         )
 
     def _run_batch_container_failure(self, batch_id, debug_info):
