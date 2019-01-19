@@ -10,7 +10,7 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
 def calculate_agency_id(conf):
-    broker_external_url = conf.d['broker']['external_url']
+    broker_external_url = conf.d['broker']['external_url'].rstrip('/')
     kdf = create_kdf('fixedsalt'.encode('utf-8'))
     agency_hash = kdf.derive(broker_external_url.encode('utf-8'))
     agency_hash = hexlify(agency_hash).decode('utf-8')

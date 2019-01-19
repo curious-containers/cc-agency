@@ -18,8 +18,7 @@ class Scheduler:
         self._conf = conf
         self._mongo = mongo
 
-        external_url = conf.d['broker']['external_url'].rstrip('/')
-        self._agency_id = calculate_agency_id(external_url)
+        self._agency_id = calculate_agency_id(conf)
 
         mongo.db['nodes'].drop()
 

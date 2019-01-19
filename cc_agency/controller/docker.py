@@ -41,7 +41,7 @@ class ClientProxy:
         self._online = None
 
         # using hash of external url to distinguish between volume names created by different agency installations
-        self._agency_id = calculate_agency_id(self._external_url)
+        self._agency_id = calculate_agency_id(conf)
         self._cc_core_volume = None
 
         node = {
