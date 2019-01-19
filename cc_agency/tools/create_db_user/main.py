@@ -2,8 +2,9 @@ import json
 from argparse import ArgumentParser
 from subprocess import call
 from time import sleep
+from ruamel.yaml import YAML
 
-from cc_agency.commons.conf import Conf
+yaml = YAML(typ='safe')
 
 DESCRIPTION = 'Create a MongoDB admin user with read and write access, as specified in cc-agency configuration.'
 
@@ -28,13 +29,14 @@ def main():
 
 
 def run(conf_file, host):
-    conf = Conf(conf_file)
+    with open(conf_file) as f:
+        conf = yaml.load(f)
 
-    host = host if host else conf.d['mongo'].get('host', 'localhost')
-    port = conf.d['mongo'].get('port', 27017)
-    db = conf.d['mongo']['db']
-    username = conf.d['mongo']['username']
-    password = conf.d['mongo']['password']
+    host = host if host else conf['mongo'].get('host', 'localhost')
+    port = conf['mongo'].get('port', 27017)
+    db = conf['mongo']['db']
+    username = conf['mongo']['username']
+    password = conf['mongo']['password']
 
     data = {
         'pwd': password,

@@ -10,9 +10,6 @@ controller:
   bind_host: "127.0.0.1"
   bind_port: 6001
   docker:
-    core_image:
-      url: "cc-core"
-      disable_pull: True
     nodes:
       node1:
         base_url: unix://var/run/docker.sock

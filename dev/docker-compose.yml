@@ -11,9 +11,9 @@ services:
   mongo-seed:
     build: ./mongo-seed
     volumes:
-      - ./cc-agency.yml:/root/.config/cc-agency.yml:ro,z
+      - ./cc-agency.yml:/opt/cc-agency.yml:ro,z
       - ../cc_agency:/opt/cc-agency/cc_agency:ro,z
-    command: "python3 -u -m cc_agency.tools.create_db_user --host mongo"
+    command: "python3 -u -m cc_agency.tools.create_db_user -c /opt/cc-agency.yml --host mongo"
     links:
       - mongo
     tty: true

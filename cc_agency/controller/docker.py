@@ -5,8 +5,11 @@ from threading import Thread
 from time import time
 from traceback import format_exc
 import tempfile
+from binascii import hexlify
+from uuid import uuid4
 
 import docker
+from docker.errors import APIError
 from bson.objectid import ObjectId
 
 from cc_core.commons.engines import engine_to_runtime
@@ -38,6 +41,8 @@ class ClientProxy:
         self._client = None
         self._online = None
 
+        # using hash of external url to distinguish between volume names created by different agency installations
+        self._agency_id = self._calculate_agency_id()
         self._cc_core_volume = None
 
         node = {
@@ -63,6 +68,13 @@ class ClientProxy:
         Thread(target=self._action_loop).start()
         self._set_online(ram, cpus)
         self._action_q.put({'action': 'inspect'})
+
+    def _calculate_agency_id(self):
+        broker_external_url = self._conf.d['broker']['external_url']
+        kdf = create_kdf('fixedsalt'.encode('utf-8'))
+        agency_hash = kdf.derive(broker_external_url.encode('utf-8'))
+        agency_hash = hexlify(agency_hash).decode('utf-8')
+        return agency_hash[-8:]
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
@@ -307,11 +319,18 @@ class ClientProxy:
         init_build_dir(build_dir)
         create_core_image_dockerfile(build_dir)
         self._client.images.build(path=build_dir, tag='cc-core')
-        self._client.volumes.prune()
-        volume = self._client.volumes.create()
+
+        for volume in self._client.volumes.list():
+            if volume.name.startswith(self._agency_id):
+                try:
+                    volume.remove()
+                except APIError:
+                    pass
+
+        self._cc_core_volume = self._agency_id + str(uuid4())
 
         binds = {
-            volume.name: {
+            self._cc_core_volume: {
                 'bind': os.path.join('/vol'),
                 'mode': 'rw'
             }
@@ -326,8 +345,6 @@ class ClientProxy:
             remove=True,
             volumes=binds
         )
-
-        self._cc_core_volume = volume.name
 
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
