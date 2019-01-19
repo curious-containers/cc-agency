@@ -24,9 +24,9 @@ def generic_copy(src, dst):
 
 def init_build_dir(build_dir):
     agent_modules = [cc_core.agent.connected.main]
-    module_deps = module_dependencies(agent_modules)
-    interpreter_deps = interpreter_dependencies()
+    module_deps, c_module_deps = module_dependencies(agent_modules)
     module_dsts = module_destinations(module_deps, build_dir)
+    interpreter_deps = interpreter_dependencies(c_module_deps)
     interpreter_dsts = interpreter_destinations(interpreter_deps, build_dir)
 
     for src, dst in module_dsts + interpreter_dsts:
