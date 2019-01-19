@@ -9,6 +9,14 @@ from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
+def calculate_agency_id(conf):
+    broker_external_url = conf.d['broker']['external_url']
+    kdf = create_kdf('fixedsalt'.encode('utf-8'))
+    agency_hash = kdf.derive(broker_external_url.encode('utf-8'))
+    agency_hash = hexlify(agency_hash).decode('utf-8')
+    return agency_hash[-8:]
+
+
 def get_ip():
     headers = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR']
     ip = None

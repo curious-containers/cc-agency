@@ -9,7 +9,7 @@ import requests
 from bson.objectid import ObjectId
 
 from cc_agency.controller.docker import ClientProxy
-from cc_agency.commons.helper import create_kdf
+from cc_agency.commons.helper import create_kdf, calculate_agency_id
 from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
 
 
@@ -17,6 +17,9 @@ class Scheduler:
     def __init__(self, conf, mongo):
         self._conf = conf
         self._mongo = mongo
+
+        external_url = conf.d['broker']['external_url'].rstrip('/')
+        self._agency_id = calculate_agency_id(external_url)
 
         mongo.db['nodes'].drop()
 
@@ -79,24 +82,24 @@ class Scheduler:
             for t in threads:
                 t.join()
 
-    @staticmethod
-    def _void_recursively(data, allowed_section):
+    def _void_recursively(self, data, allowed_section):
         if isinstance(data, dict):
             result = {}
             for key, val in data.items():
                 if allowed_section and (key == 'password' or key.startswith('_')):
-                    kdf = create_kdf('fixedsalt'.encode('utf-8'))
+                    salt = self._agency_id
+                    kdf = create_kdf(salt.encode('utf-8'))
                     val_hash = kdf.derive(val.encode('utf-8'))
                     val_hash = hexlify(val_hash).decode('utf-8')
                     result[key] = '{{' + val_hash[-8:] + '}}'
                 elif key in ['access', 'auth']:
-                    result[key] = Scheduler._void_recursively(val, True)
+                    result[key] = self._void_recursively(val, True)
                 else:
-                    result[key] = Scheduler._void_recursively(val, allowed_section)
+                    result[key] = self._void_recursively(val, allowed_section)
 
             return result
         elif isinstance(data, list):
-            return [Scheduler._void_recursively(val, allowed_section) for val in data]
+            return [self._void_recursively(val, allowed_section) for val in data]
 
         return data
 
@@ -160,7 +163,7 @@ class Scheduler:
                 bson_id = batch['_id']
                 del batch['_id']
 
-                data = Scheduler._void_recursively(batch, False)
+                data = self._void_recursively(batch, False)
                 data['protectedKeysVoided'] = True
                 self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
 
@@ -195,7 +198,7 @@ class Scheduler:
                     finished_count = cursor[0]['count']
 
                     if all_count == finished_count:
-                        data = Scheduler._void_recursively(experiment, False)
+                        data = self._void_recursively(experiment, False)
                         data['protectedKeysVoided'] = True
                         self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 

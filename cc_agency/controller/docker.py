@@ -5,7 +5,6 @@ from threading import Thread
 from time import time
 from traceback import format_exc
 import tempfile
-from binascii import hexlify
 from uuid import uuid4
 
 import docker
@@ -16,7 +15,7 @@ from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 from cc_core.commons.mnt_core import MOD_DIR, PYMOD_DIR, LIB_DIR, CC_DIR
 
-from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure
+from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
 from cc_agency.commons.mnt_core import init_build_dir, create_core_image_dockerfile, CC_CORE_IMAGE
 
 
@@ -42,7 +41,7 @@ class ClientProxy:
         self._online = None
 
         # using hash of external url to distinguish between volume names created by different agency installations
-        self._agency_id = self._calculate_agency_id()
+        self._agency_id = calculate_agency_id(self._external_url)
         self._cc_core_volume = None
 
         node = {
@@ -69,12 +68,7 @@ class ClientProxy:
         self._set_online(ram, cpus)
         self._action_q.put({'action': 'inspect'})
 
-    def _calculate_agency_id(self):
-        broker_external_url = self._conf.d['broker']['external_url']
-        kdf = create_kdf('fixedsalt'.encode('utf-8'))
-        agency_hash = kdf.derive(broker_external_url.encode('utf-8'))
-        agency_hash = hexlify(agency_hash).decode('utf-8')
-        return agency_hash[-8:]
+
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
