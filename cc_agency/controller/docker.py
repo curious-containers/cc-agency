@@ -13,7 +13,7 @@ from bson.objectid import ObjectId
 
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
-from cc_core.commons.mnt_core import MOD_DIR, PYMOD_DIR, LIB_DIR, CC_DIR
+from cc_core.commons.mnt_core import CC_DIR, interpreter_command
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
 from cc_agency.commons.mnt_core import init_build_dir, create_core_image_dockerfile, CC_CORE_IMAGE
@@ -67,8 +67,6 @@ class ClientProxy:
         Thread(target=self._action_loop).start()
         self._set_online(ram, cpus)
         self._action_q.put({'action': 'inspect'})
-
-
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
@@ -221,20 +219,8 @@ class ClientProxy:
     def _inspect(self):
         print('Node inspection:', self._node_name)
 
-        command = [
-            'LD_LIBRARY_PATH_BAK=${LD_LIBRARY_PATH}',
-            'PYTHONPATH_BAK=${PYTHONPATH}',
-            'PYTHONHOME_BAK=${PYTHONHOME}',
-            'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
-            'PYTHONPATH={}:{}:{}:{}'.format(
-                os.path.join('/', PYMOD_DIR),
-                os.path.join('/', PYMOD_DIR, 'lib-dynload'),
-                os.path.join('/', PYMOD_DIR, 'site-packages'),
-                os.path.join('/', MOD_DIR)
-            ),
-            'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
-            os.path.join('/', LIB_DIR, 'ld.so'),
-            os.path.join('/', LIB_DIR, 'python'),
+        command = interpreter_command()
+        command += [
             '-m',
             'cc_core.agent.connected',
             self._external_url,
@@ -380,20 +366,8 @@ class ClientProxy:
             'timestamp': time()
         })
 
-        command = [
-            'LD_LIBRARY_PATH_BAK=${LD_LIBRARY_PATH}',
-            'PYTHONPATH_BAK=${PYTHONPATH}',
-            'PYTHONHOME_BAK=${PYTHONHOME}',
-            'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
-            'PYTHONPATH={}:{}:{}:{}'.format(
-                os.path.join('/', PYMOD_DIR),
-                os.path.join('/', PYMOD_DIR, 'lib-dynload'),
-                os.path.join('/', PYMOD_DIR, 'site-packages'),
-                os.path.join('/', MOD_DIR)
-            ),
-            'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
-            os.path.join('/', LIB_DIR, 'ld.so'),
-            os.path.join('/', LIB_DIR, 'python'),
+        command = interpreter_command()
+        command += [
             '-m',
             'cc_core.agent.connected',
             '{}/callback/{}/{}'.format(self._external_url, batch_id, token)
