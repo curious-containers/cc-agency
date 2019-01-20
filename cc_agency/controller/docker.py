@@ -226,17 +226,17 @@ class ClientProxy:
             'PYTHONPATH_BAK=${PYTHONPATH}',
             'PYTHONHOME_BAK=${PYTHONHOME}',
             'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
-            'PYTHONPATH={}:{}:{}'.format(
+            'PYTHONPATH={}:{}:{}:{}'.format(
                 os.path.join('/', PYMOD_DIR),
                 os.path.join('/', PYMOD_DIR, 'lib-dynload'),
+                os.path.join('/', PYMOD_DIR, 'site-packages'),
                 os.path.join('/', MOD_DIR)
             ),
             'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
             os.path.join('/', LIB_DIR, 'ld.so'),
             os.path.join('/', LIB_DIR, 'python'),
             '-m',
-            'cc_core.agent',
-            'connected',
+            'cc_core.agent.connected',
             self._external_url,
             '--inspect'
         ]
@@ -385,17 +385,17 @@ class ClientProxy:
             'PYTHONPATH_BAK=${PYTHONPATH}',
             'PYTHONHOME_BAK=${PYTHONHOME}',
             'LD_LIBRARY_PATH={}'.format(os.path.join('/', LIB_DIR)),
-            'PYTHONPATH={}:{}:{}'.format(
+            'PYTHONPATH={}:{}:{}:{}'.format(
                 os.path.join('/', PYMOD_DIR),
                 os.path.join('/', PYMOD_DIR, 'lib-dynload'),
+                os.path.join('/', PYMOD_DIR, 'site-packages'),
                 os.path.join('/', MOD_DIR)
             ),
             'PYTHONHOME={}'.format(os.path.join('/', PYMOD_DIR)),
             os.path.join('/', LIB_DIR, 'ld.so'),
             os.path.join('/', LIB_DIR, 'python'),
             '-m',
-            'cc_core.agent',
-            'connected',
+            'cc_core.agent.connected',
             '{}/callback/{}/{}'.format(self._external_url, batch_id, token)
         ]
 
