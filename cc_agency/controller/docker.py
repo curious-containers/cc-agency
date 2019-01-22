@@ -210,6 +210,7 @@ class ClientProxy:
             ram, cpus = self._info()
             self._inspect()
         except Exception:
+            self._client = None
             return
 
         self._action_q = Queue()
@@ -279,7 +280,7 @@ class ClientProxy:
                     inspect = True
 
             if inspect:
-                build_dir = tempfile.mkdtemp()
+                build_dir = None
                 try:
                     if self._cc_core_volume is None:
                         build_dir = tempfile.mkdtemp()
@@ -290,7 +291,8 @@ class ClientProxy:
                     self._action_q = None
                     self._client = None
                 finally:
-                    shutil.rmtree(build_dir)
+                    if build_dir is not None:
+                        shutil.rmtree(build_dir)
 
             if not self._online:
                 return
@@ -307,7 +309,7 @@ class ClientProxy:
                 except APIError:
                     pass
 
-        self._cc_core_volume = self._agency_id + str(uuid4())
+        self._cc_core_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
 
         binds = {
             self._cc_core_volume: {
