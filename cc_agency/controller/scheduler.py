@@ -367,17 +367,16 @@ class Scheduler:
 
             ram = experiment['container']['settings']['ram']
 
-            batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit', 10)
-            if batch_concurrency_limit:
-                concurrent_batches = self._mongo.db['batches'].aggregate([
-                    {'$match': {
-                        'experimentId': experiment_id,
-                        'status': {'$in': ['scheduled', 'processing']}
-                    }},
-                    {'$count': 'count'}
-                ])
-                if concurrent_batches['count'] >= batch_concurrency_limit:
-                    continue
+            batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit', 64)
+            concurrent_batches = self._mongo.db['batches'].aggregate([
+                {'$match': {
+                    'experimentId': experiment_id,
+                    'status': {'$in': ['scheduled', 'processing']}
+                }},
+                {'$count': 'count'}
+            ])
+            if concurrent_batches['count'] >= batch_concurrency_limit:
+                continue
 
             # select node
             possible_nodes = [node for node in nodes if Scheduler._node_sufficient(node, experiment)]
