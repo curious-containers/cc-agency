@@ -90,11 +90,10 @@ conf_schema = {
                 'scheduling': {
                     'type': 'object',
                     'properties': {
-                        'strategy': {'enum': ['spread', 'binpack']},
-                        'attempts_to_fail': {'type': 'integer'}
+                        'strategy': {'enum': ['spread', 'binpack']}
                     },
                     'additionalProperties': False,
-                    'required': ['strategy', 'attempts_to_fail']
+                    'required': ['strategy']
                 },
                 'notification_hooks': {
                     'type': 'array',

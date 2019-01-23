@@ -48,7 +48,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
 
     batch = mongo.db['batches'].find_one(
         {'_id': bson_id},
-        {'attempts': 1, 'node': 1}
+        {'attempts': 1, 'node': 1, 'experimentId': 1}
     )
 
     timestamp = time()
@@ -58,11 +58,22 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
     new_state = 'registered'
     new_node = None
 
-    attempts_to_fail = conf.d['controller']['scheduling']['attempts_to_fail']
-
-    if attempts >= attempts_to_fail:
+    if attempts >= 2:
         new_state = 'failed'
         new_node = node_name
+    else:
+        experiment_id = batch['experimentId']
+        bson_experiment_id = ObjectId(experiment_id)
+        experiment = mongo.db['experiments'].find_one(
+            {
+                '_id': bson_experiment_id,
+                'retryIfFailed': True
+            },
+            {'_id': 1}
+        )
+        if not experiment:
+            new_state = 'failed'
+            new_node = node_name
 
     mongo.db['batches'].update(
         {'_id': bson_id},
