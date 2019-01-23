@@ -367,7 +367,7 @@ class Scheduler:
 
             ram = experiment['container']['settings']['ram']
 
-            batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit')
+            batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit', 10)
             if batch_concurrency_limit:
                 concurrent_batches = self._mongo.db['batches'].aggregate([
                     {'$match': {
