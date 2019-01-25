@@ -16,7 +16,7 @@ from cc_core.commons.gpu_info import set_nvidia_environment_variables
 from cc_core.commons.mnt_core import CC_DIR, interpreter_command
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
-from cc_agency.commons.mnt_core import init_build_dir, create_core_image_dockerfile, CC_CORE_IMAGE
+from cc_agency.commons.mnt_core import build_dir_path, CC_CORE_IMAGE
 
 
 class ClientProxy:
@@ -24,6 +24,8 @@ class ClientProxy:
         self._node_name = node_name
         self._conf = conf
         self._mongo = mongo
+
+        self._build_dir = build_dir_path(conf)
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
         self._base_url = node_conf['base_url']
@@ -280,26 +282,19 @@ class ClientProxy:
                     inspect = True
 
             if inspect:
-                build_dir = None
                 try:
                     if self._cc_core_volume is None:
-                        build_dir = tempfile.mkdtemp()
-                        self._init_cc_core(build_dir)
+                        self._init_cc_core(self._build_dir)
                     self._inspect()
                 except Exception:
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
-                finally:
-                    if build_dir is not None:
-                        shutil.rmtree(build_dir)
 
             if not self._online:
                 return
 
     def _init_cc_core(self, build_dir):
-        init_build_dir(build_dir)
-        create_core_image_dockerfile(build_dir)
         self._client.images.build(path=build_dir, tag='cc-core')
 
         for volume in self._client.volumes.list():

@@ -8,9 +8,11 @@ from traceback import format_exc
 import requests
 from bson.objectid import ObjectId
 
+from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
+
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf, calculate_agency_id
-from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
+from cc_agency.commons.mnt_core import init_build_dir
 
 
 class Scheduler:
@@ -26,6 +28,8 @@ class Scheduler:
         self._inspection_q = Queue(maxsize=1)
         self._voiding_q = Queue(maxsize=1)
         self._notification_q = Queue(maxsize=1)
+
+        init_build_dir(conf)
 
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo)

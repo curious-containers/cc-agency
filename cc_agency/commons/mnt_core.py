@@ -5,6 +5,8 @@ import cc_core.agent.connected.main
 from cc_core.commons.mnt_core import module_dependencies, interpreter_dependencies, CC_DIR
 from cc_core.commons.mnt_core import module_destinations, interpreter_destinations
 
+from cc_agency.commons.helper import calculate_agency_id
+
 
 CC_CORE_IMAGE = 'cc-core'
 
@@ -22,7 +24,17 @@ def generic_copy(src, dst):
         shutil.copy(src, dst)
 
 
-def init_build_dir(build_dir):
+def build_dir_path(conf):
+    agency_id = calculate_agency_id(conf)
+    return os.path.expanduser(os.path.join('~', '.cache', agency_id, 'cc-core'))
+
+
+def init_build_dir(conf):
+    build_dir = build_dir_path(conf)
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
+    os.makedirs(build_dir)
+
     agent_modules = [cc_core.agent.connected.main]
     module_deps, c_module_deps = module_dependencies(agent_modules)
     module_dsts = module_destinations(module_deps, build_dir)
@@ -32,8 +44,6 @@ def init_build_dir(build_dir):
     for src, dst in module_dsts + interpreter_dsts:
         generic_copy(src, dst)
 
-
-def create_core_image_dockerfile(build_dir):
     content = [
         'FROM docker.io/debian:9.5-slim',
         'RUN useradd -ms /bin/bash cc',
