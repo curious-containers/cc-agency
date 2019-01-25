@@ -364,6 +364,7 @@ class Scheduler:
                 'experimentId': experiment_id,
                 'status': {'$in': ['scheduled', 'processing']}
             })
+            print(experiment_id, batch_id, batch_count)
             if batch_count >= batch_concurrency_limit:
                 continue
 
