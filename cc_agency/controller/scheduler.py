@@ -377,7 +377,7 @@ class Scheduler:
             ])
 
             concurrent_batches = list(concurrent_batches)
-            if concurrent_batches[0]['count'] >= batch_concurrency_limit:
+            if concurrent_batches and concurrent_batches[0]['count'] >= batch_concurrency_limit:
                 continue
 
             # select node
