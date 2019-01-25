@@ -65,13 +65,10 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
         experiment_id = batch['experimentId']
         bson_experiment_id = ObjectId(experiment_id)
         experiment = mongo.db['experiments'].find_one(
-            {
-                '_id': bson_experiment_id,
-                'retryIfFailed': True
-            },
-            {'_id': 1}
+            {'_id': bson_experiment_id},
+            {'retryIfFailed': 1}
         )
-        if not experiment:
+        if not (experiment and experiment.get('retryIfFailed')):
             new_state = 'failed'
             new_node = node_name
 
