@@ -375,7 +375,9 @@ class Scheduler:
                 }},
                 {'$count': 'count'}
             ])
-            if concurrent_batches['count'] >= batch_concurrency_limit:
+
+            concurrent_batches = list(concurrent_batches)
+            if concurrent_batches[0]['count'] >= batch_concurrency_limit:
                 continue
 
             # select node
