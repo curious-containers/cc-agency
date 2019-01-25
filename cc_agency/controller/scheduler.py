@@ -362,10 +362,9 @@ class Scheduler:
             batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit', 64)
             batch_count = self._mongo.db['batches'].count({
                 'experimentId': experiment_id,
-                'status': {'$in': ['scheduled', 'processing']}
+                'state': {'$in': ['scheduled', 'processing']}
             })
             
-            print(experiment_id, batch_id, batch_concurrency_limit, batch_count)
             if batch_count >= batch_concurrency_limit:
                 continue
 
