@@ -181,29 +181,17 @@ class Scheduler:
                 bson_id = experiment['_id']
                 experiment_id = str(bson_id)
 
-                cursor = self._mongo.db['batches'].aggregate([
-                    {'$match': {'experimentId': experiment_id}},
-                    {'$count': 'count'}
-                ])
-                all_count = list(cursor)[0]['count']
+                all_count = self._mongo.db['batches'].count({'experimentId': experiment_id})
 
-                cursor = self._mongo.db['batches'].aggregate([
-                    {
-                        '$match': {
-                            'experimentId': experiment_id,
-                            'state': {'$in': ['succeeded', 'failed', 'cancelled']}
-                        }
-                    },
-                    {'$count': 'count'}
-                ])
-                cursor = list(cursor)
-                if cursor:
-                    finished_count = cursor[0]['count']
+                finished_count = self._mongo.db['batches'].count({
+                    'experimentId': experiment_id,
+                    'state': {'$in': ['succeeded', 'failed', 'cancelled']}
+                })
 
-                    if all_count == finished_count:
-                        data = self._void_recursively(experiment, False)
-                        data['protectedKeysVoided'] = True
-                        self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
+                if all_count == finished_count:
+                    data = self._void_recursively(experiment, False)
+                    data['protectedKeysVoided'] = True
+                    self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
 
     def _scheduling_loop(self):
         while True:
@@ -372,16 +360,11 @@ class Scheduler:
             ram = experiment['container']['settings']['ram']
 
             batch_concurrency_limit = experiment['execution']['settings'].get('batchConcurrencyLimit', 64)
-            concurrent_batches = self._mongo.db['batches'].aggregate([
-                {'$match': {
-                    'experimentId': experiment_id,
-                    'status': {'$in': ['scheduled', 'processing']}
-                }},
-                {'$count': 'count'}
-            ])
-
-            concurrent_batches = list(concurrent_batches)
-            if concurrent_batches and concurrent_batches[0]['count'] >= batch_concurrency_limit:
+            batch_count = self._mongo.db['batches'].count({
+                'experimentId': experiment_id,
+                'status': {'$in': ['scheduled', 'processing']}
+            })
+            if batch_count >= batch_concurrency_limit:
                 continue
 
             # select node
