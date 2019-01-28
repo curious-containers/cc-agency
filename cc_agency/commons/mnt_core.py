@@ -1,7 +1,6 @@
 import os
 import shutil
 
-import cc_core.agent.connected.main
 from cc_core.commons.mnt_core import module_dependencies, interpreter_dependencies, CC_DIR
 from cc_core.commons.mnt_core import module_destinations, interpreter_destinations
 
@@ -35,10 +34,17 @@ def init_build_dir(conf):
         shutil.rmtree(build_dir)
     os.makedirs(build_dir)
 
-    agent_modules = [cc_core.agent.connected.main]
-    module_deps, c_module_deps = module_dependencies(agent_modules)
-    module_dsts = module_destinations(module_deps, build_dir)
-    interpreter_deps = interpreter_dependencies(c_module_deps)
+    import cc_core.agent.connected.__main__
+    import cc_core
+    import runpy
+    import keyword
+    import opcode
+
+    source_paths, c_source_paths = module_dependencies(
+        [cc_core, cc_core.agent.connected.__main__, runpy, keyword, opcode]
+    )
+    module_dsts= module_destinations(source_paths, build_dir)
+    interpreter_deps = interpreter_dependencies(c_source_paths)
     interpreter_dsts = interpreter_destinations(interpreter_deps, build_dir)
 
     for src, dst in module_dsts + interpreter_dsts:
