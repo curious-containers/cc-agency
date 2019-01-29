@@ -66,7 +66,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
         bson_experiment_id = ObjectId(experiment_id)
         experiment = mongo.db['experiments'].find_one(
             {'_id': bson_experiment_id},
-            {'retryIfFailed': 1}
+            {'execution.settings.retryIfFailed': 1}
         )
         if not (experiment and experiment.get('retryIfFailed')):
             new_state = 'failed'
