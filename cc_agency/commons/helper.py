@@ -68,7 +68,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
             {'_id': bson_experiment_id},
             {'execution.settings.retryIfFailed': 1}
         )
-        if not (experiment and experiment.get('retryIfFailed')):
+        if not (experiment and experiment.get('execution', {}).get('settings', {}).get('retryIfFailed')):
             new_state = 'failed'
             new_node = node_name
 
