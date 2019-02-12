@@ -9,6 +9,7 @@ import requests
 from bson.objectid import ObjectId
 
 from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
+from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mount_connectors_from_outputs
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf, calculate_agency_id
@@ -396,6 +397,16 @@ class Scheduler:
                     used_gpu_ids.append(gpu.device_id)
                     available_gpus.remove(gpu)
 
+            # check mounting
+            mount_connectors = red_get_mount_connectors_from_inputs(batch['inputs'])
+            batch_outputs = batch.get('outputs')
+            if batch_outputs:
+                mount_connectors.extend(red_get_mount_connectors_from_outputs(batch_outputs))
+
+            is_mounting = bool(mount_connectors)
+
+            # TODO: Add mount insecure validation here
+
             # schedule image pull on selected node
             disable_pull = False
             if 'execution' in experiment:
@@ -423,7 +434,8 @@ class Scheduler:
                     '$set': {
                         'state': 'scheduled',
                         'node': selected_node['nodeName'],
-                        'usedGPUs': used_gpu_ids
+                        'usedGPUs': used_gpu_ids,
+                        'mount': is_mounting
                     },
                     '$push': {
                         'history': {
@@ -475,7 +487,7 @@ class Scheduler:
         cursor = self._mongo.db['batches'].aggregate([
             {'$match': {'state': 'registered'}},
             {'$sort': {'registrationTime': 1}},
-            {'$project': {'experimentId': 1}}
+            {'$project': {'experimentId': 1, 'inputs': 1, 'outputs': 1}}
         ])
         for b in cursor:
             yield b
