@@ -409,6 +409,9 @@ class Scheduler:
 
             if not allow_insecure_capabilities and is_mounting:
                 # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
+                debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
+                             'configured to mount inside a docker container.\n{}'\
+                             .format(mount_connectors)
                 self._mongo.db['batches'].update_one(
                     {'_id': batch['_id']},
                     {
@@ -422,9 +425,7 @@ class Scheduler:
                             'history': {
                                 'state': 'failed',
                                 'time': timestamp,
-                                'debugInfo': 'FUSE support for this agency is disabled, but the following input/output-keys are '
-                                             'configured to mount inside a docker container.\n{}'
-                                             .format(mount_connectors),
+                                'debugInfo': debug_info,
                                 'node': selected_node['nodeName'],
                                 'ccagent': None
                             }
@@ -435,7 +436,6 @@ class Scheduler:
                     }
                 )
                 continue
-
 
             # schedule image pull on selected node
             disable_pull = False
