@@ -405,7 +405,37 @@ class Scheduler:
 
             is_mounting = bool(mount_connectors)
 
-            # TODO: Add mount insecure validation here
+            allow_insecure_capabilities = self._conf.d['controller']['docker'].get('allow_insecure_capabilities', False)
+
+            if not allow_insecure_capabilities and is_mounting:
+                # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
+                self._mongo.db['batches'].update_one(
+                    {'_id': batch['_id']},
+                    {
+                        '$set': {
+                            'state': 'failed',
+                            'node': selected_node['nodeName'],
+                            'usedGPUs': used_gpu_ids,
+                            'mount': is_mounting
+                        },
+                        '$push': {
+                            'history': {
+                                'state': 'failed',
+                                'time': timestamp,
+                                'debugInfo': 'FUSE support for this agency is disabled, but the following input/output-keys are '
+                                             'configured to mount inside a docker container.\n{}'
+                                             .format(mount_connectors),
+                                'node': selected_node['nodeName'],
+                                'ccagent': None
+                            }
+                        },
+                        '$inc': {
+                            'attempts': 1
+                        }
+                    }
+                )
+                continue
+
 
             # schedule image pull on selected node
             disable_pull = False
