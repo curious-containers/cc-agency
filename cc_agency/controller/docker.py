@@ -401,6 +401,11 @@ class ClientProxy:
             }
         )
 
+        # remove container if it exists from earlier attempt
+        existing_container = self._batch_containers(None).get(batch_id)
+        if existing_container is not None:
+            existing_container.remove(force=True)
+
         self._client.containers.run(
             image,
             command,
