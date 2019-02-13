@@ -141,7 +141,11 @@ class ClientProxy:
         if not self._online:
             return batch_containers
 
-        containers = self._client.containers.list(all=True, limit=-1, filters={'status': status})
+        filters = {'status': status}
+        if status is None:
+            filters = None
+
+        containers = self._client.containers.list(all=True, limit=-1, filters=filters)
 
         for c in containers:
             try:
