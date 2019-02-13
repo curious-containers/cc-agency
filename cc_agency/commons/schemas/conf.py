@@ -82,7 +82,8 @@ conf_schema = {
                                 }
                             },
                             'additionalProperties': False
-                        }
+                        },
+                        'allow_insecure_capabilities': {'type': 'boolean'}
                     },
                     'additionalProperties': False,
                     'required': ['nodes']

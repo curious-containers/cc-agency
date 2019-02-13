@@ -326,7 +326,7 @@ class ClientProxy:
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
             {'_id': ObjectId(batch_id), 'state': 'scheduled'},
-            {'experimentId': 1, 'usedGPUs': 1}
+            {'experimentId': 1, 'usedGPUs': 1, 'mount': 1}
         )
         if not batch:
             return
@@ -350,6 +350,16 @@ class ClientProxy:
         if gpus:
             set_nvidia_environment_variables(environment, gpus)
 
+        # set mount variables
+        devices = []
+        capabilities = []
+        security_opt = []
+        if batch['mount']:
+            devices.append('/dev/fuse')
+            capabilities.append('SYS_ADMIN')
+            security_opt.append('apparmor:unconfined')
+
+        # set image
         image = experiment['container']['settings']['image']['url']
 
         token = generate_secret()
@@ -418,7 +428,10 @@ class ClientProxy:
             runtime=runtime,
             environment=environment,
             network=self._network,
-            volumes=binds
+            volumes=binds,
+            devices=devices,
+            cap_add=capabilities,
+            security_opt=security_opt
         )
 
     def _run_batch_container_failure(self, batch_id, debug_info):

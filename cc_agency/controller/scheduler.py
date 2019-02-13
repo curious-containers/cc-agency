@@ -9,6 +9,7 @@ import requests
 from bson.objectid import ObjectId
 
 from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
+from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mount_connectors_from_outputs
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import create_kdf, calculate_agency_id
@@ -396,6 +397,46 @@ class Scheduler:
                     used_gpu_ids.append(gpu.device_id)
                     available_gpus.remove(gpu)
 
+            # check mounting
+            mount_connectors = red_get_mount_connectors_from_inputs(batch['inputs'])
+            batch_outputs = batch.get('outputs')
+            if batch_outputs:
+                mount_connectors.extend(red_get_mount_connectors_from_outputs(batch_outputs))
+
+            is_mounting = bool(mount_connectors)
+
+            allow_insecure_capabilities = self._conf.d['controller']['docker'].get('allow_insecure_capabilities', False)
+
+            if not allow_insecure_capabilities and is_mounting:
+                # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
+                debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
+                             'configured to mount inside a docker container.\n{}'\
+                             .format(mount_connectors)
+                self._mongo.db['batches'].update_one(
+                    {'_id': batch['_id']},
+                    {
+                        '$set': {
+                            'state': 'failed',
+                            'node': selected_node['nodeName'],
+                            'usedGPUs': used_gpu_ids,
+                            'mount': is_mounting
+                        },
+                        '$push': {
+                            'history': {
+                                'state': 'failed',
+                                'time': timestamp,
+                                'debugInfo': debug_info,
+                                'node': selected_node['nodeName'],
+                                'ccagent': None
+                            }
+                        },
+                        '$inc': {
+                            'attempts': 1
+                        }
+                    }
+                )
+                continue
+
             # schedule image pull on selected node
             disable_pull = False
             if 'execution' in experiment:
@@ -423,7 +464,8 @@ class Scheduler:
                     '$set': {
                         'state': 'scheduled',
                         'node': selected_node['nodeName'],
-                        'usedGPUs': used_gpu_ids
+                        'usedGPUs': used_gpu_ids,
+                        'mount': is_mounting
                     },
                     '$push': {
                         'history': {
@@ -475,7 +517,7 @@ class Scheduler:
         cursor = self._mongo.db['batches'].aggregate([
             {'$match': {'state': 'registered'}},
             {'$sort': {'registrationTime': 1}},
-            {'$project': {'experimentId': 1}}
+            {'$project': {'experimentId': 1, 'inputs': 1, 'outputs': 1}}
         ])
         for b in cursor:
             yield b
