@@ -54,7 +54,7 @@ def get_version():
 
 
 red_routes(app, mongo, auth, controller)
-nodes_routes(app, mongo, auth)
+nodes_routes(app, mongo, auth, conf)
 callback_routes(app, mongo, auth, conf, controller)
 auth_routes(app, auth, conf)
 

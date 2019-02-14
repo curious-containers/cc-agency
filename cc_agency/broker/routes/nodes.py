@@ -3,9 +3,16 @@ from werkzeug.exceptions import Unauthorized
 from bson.objectid import ObjectId
 
 
-def nodes_routes(app, mongo, auth):
+def _get_node_gpu_info(conf_nodes, node_name):
+    node = conf_nodes[node_name]
+    if ('hardware' in node) and ('gpus' in node['hardware']):
+        return node['hardware']['gpus']
+
+
+def nodes_routes(app, mongo, auth, conf):
     @app.route('/nodes', methods=['GET'])
     def get_nodes():
+        conf_nodes = conf.d['controller']['docker']['nodes']
         user = auth.verify_user(request.authorization)
         if not user:
             raise Unauthorized()
@@ -41,6 +48,9 @@ def nodes_routes(app, mongo, auth):
                 if b['node'] == node['nodeName']
             ]
             node['currentBatches'] = batches_ram
+            gpu_info = _get_node_gpu_info(conf_nodes, node['nodeName'])
+            if gpu_info:
+                node['gpus'] = gpu_info
             del node['_id']
 
         return jsonify(nodes)
