@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "cc-agency"
 version = "6.0.0"
-authors = ["Christoph Jansen <Christoph.Jansen@htw-berlin.de>"]
+authors = ["Christoph Jansen <Christoph.Jansen@htw-berlin.de>", "Bruno Schilling <Bruno.Schilling@student.htw-berlin.de>"]
 license = "AGPL-3.0"
 readme = "README.md"
 repository = "https://github.com/curious-containers/cc-agency"
@@ -10,7 +10,7 @@ description = "CC-Agency is part of the Curious Containers project. It connects 
 
 [tool.poetry.dependencies]
 python = "^3.4"
-cc-core = "~5.4"
+cc-core = "~6.0"
 flask = "^1.0"
 jsonschema = "^2.6"
 docker = "^3.4"
