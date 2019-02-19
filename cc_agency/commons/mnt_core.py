@@ -35,11 +35,8 @@ def init_build_dir(conf):
     os.makedirs(build_dir)
 
     import cc_core.agent.connected.__main__
-    import runpy
-    import keyword
-    import opcode
 
-    source_paths, c_source_paths = module_dependencies([cc_core.agent.connected.__main__, runpy, keyword, opcode])
+    source_paths, c_source_paths = module_dependencies([cc_core.agent.connected.__main__])
     module_dsts= module_destinations(source_paths, build_dir)
     interpreter_deps = interpreter_dependencies(c_source_paths)
     interpreter_dsts = interpreter_destinations(interpreter_deps, build_dir)
