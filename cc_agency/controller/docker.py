@@ -214,6 +214,8 @@ class ClientProxy:
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
+            if self._cc_core_volume is None:
+                self._init_cc_core(self._build_dir)
             self._inspect()
         except Exception:
             self._client = None
@@ -291,6 +293,7 @@ class ClientProxy:
                         self._init_cc_core(self._build_dir)
                     self._inspect()
                 except Exception:
+                    self._cc_core_volume = None
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
@@ -305,13 +308,13 @@ class ClientProxy:
             if volume.name.startswith(self._agency_id):
                 try:
                     volume.remove()
-                except APIError:
+                except Exception:
                     pass
 
-        self._cc_core_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
+        cc_core_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
 
         binds = {
-            self._cc_core_volume: {
+            cc_core_volume: {
                 'bind': os.path.join('/vol'),
                 'mode': 'rw'
             }
@@ -326,6 +329,8 @@ class ClientProxy:
             remove=True,
             volumes=binds
         )
+
+        self._cc_core_volume = cc_core_volume
 
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
