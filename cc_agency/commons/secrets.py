@@ -121,7 +121,7 @@ class TrusteeClient:
                 self._trustee.send_json(d)
             except ZMQError:
                 print('PID {} could not send {} request to trustee.'.format(os.getpid(), d['action']))
-                sleep(random()*2)
+                sleep(random())
                 continue
 
             return self._trustee.recv_json()
