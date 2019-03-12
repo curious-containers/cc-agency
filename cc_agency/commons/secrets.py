@@ -88,7 +88,7 @@ class TrusteeClient:
     def __init__(self, conf):
         self._conf = conf
 
-        bind_socket = os.path.expanduser(conf.d['trustee']['bind_socket'])
+        bind_socket = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
         bind_socket = 'ipc://{}'.format(bind_socket)
 
         context = zmq.Context()

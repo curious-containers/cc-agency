@@ -25,9 +25,7 @@ conf_schema = {
         'controller': {
             'type': 'object',
             'properties': {
-                'external_url': {'type': 'string'},
-                'bind_host': {'type': 'string'},
-                'bind_port': {'type': 'integer'},
+                'bind_socket_path': {'type': 'string'},
                 'docker': {
                     'type': 'object',
                     'properties': {
@@ -118,7 +116,15 @@ conf_schema = {
                 }
             },
             'additionalProperties': False,
-            'required': ['external_url', 'bind_host', 'bind_port', 'docker', 'scheduling']
+            'required': ['bind_socket_path', 'docker', 'scheduling']
+        },
+        'trustee': {
+            'type': 'object',
+            'properties': {
+                'bind_socket_path': {'type': 'string'}
+            },
+            'additionalProperties': False,
+            'required': ['bind_socket_path']
         },
         'mongo': {
             'type': 'object',
@@ -134,5 +140,5 @@ conf_schema = {
         }
     },
     'additionalProperties': False,
-    'required': ['broker', 'controller', 'mongo']
+    'required': ['broker', 'controller', 'trustee', 'mongo']
 }

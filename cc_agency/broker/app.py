@@ -1,3 +1,4 @@
+import os
 from argparse import ArgumentParser
 
 from flask import Flask, jsonify, request
@@ -31,9 +32,12 @@ conf = Conf(args.conf_file)
 mongo = Mongo(conf)
 auth = Auth(conf, mongo)
 
+bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
+bind_socket = 'ipc://{}'.format(bind_socket_path)
+
 context = zmq.Context()
 controller = context.socket(zmq.PUSH)
-controller.connect(conf.d['controller']['external_url'])
+controller.connect(bind_socket)
 
 
 @app.route('/', methods=['GET'])

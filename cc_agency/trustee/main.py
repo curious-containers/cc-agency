@@ -20,15 +20,20 @@ def main():
 
     conf = Conf(args.conf_file)
 
-    bind_socket = os.path.expanduser(conf.d['trustee']['bind_socket'])
-    bind_socket = 'ipc://{}'.format(bind_socket)
+    bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
+    bind_socket_dir, _ = os.path.split(bind_socket_path)
     os.umask(0o077)
-
-    secrets = {}
+    if not os.path.exists(bind_socket_dir):
+        try:
+            os.makedirs(bind_socket_dir)
+        except Exception:
+            pass
 
     context = zmq.Context()
     socket = context.socket(zmq.REP)
-    socket.bind(bind_socket)
+    socket.bind('ipc://{}'.format(bind_socket_path))
+
+    secrets = {}
 
     while True:
         data = socket.recv_json()

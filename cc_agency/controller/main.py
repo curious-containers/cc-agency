@@ -1,3 +1,4 @@
+import os
 from argparse import ArgumentParser
 import zmq
 
@@ -27,12 +28,15 @@ def main():
     mongo = Mongo(conf)
     scheduler = Scheduler(conf, mongo)
 
+    bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
+    bind_socket_dir, _ = os.path.split(bind_socket_path)
+    os.umask(0o077)
+    if not os.path.exists(bind_socket_dir):
+        os.makedirs(bind_socket_dir)
+
     context = zmq.Context()
     socket = context.socket(zmq.PULL)
-    socket.bind('tcp://{}:{}'.format(
-        conf.d['controller']['bind_host'],
-        conf.d['controller']['bind_port']
-    ))
+    socket.bind('ipc://{}'.format(bind_socket_path))
 
     while True:
         data = socket.recv_json()
