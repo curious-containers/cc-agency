@@ -30,7 +30,7 @@ class SocketWrapper:
         old_umask = os.umask(0o077)
         context = zmq.Context()
         socket = context.socket(zmq.REP)
-        socket.bind('ipc://{}'.format(self._bind_socket_ipc_path))
+        socket.bind(self._bind_socket_ipc_path)
         os.umask(old_umask)
         return socket
 
