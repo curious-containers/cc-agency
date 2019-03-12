@@ -1,6 +1,7 @@
 import os
 import sys
 from argparse import ArgumentParser
+import atexit
 
 import zmq
 from zmq.error import ZMQError
@@ -26,6 +27,8 @@ class SocketWrapper:
 
         self._socket = self._create_socket()
 
+        atexit.register(self._socket.close)
+
     def _create_socket(self):
         old_umask = os.umask(0o077)
         context = zmq.Context()
@@ -35,20 +38,10 @@ class SocketWrapper:
         return socket
 
     def recv_json(self):
-        try:
-            return self._socket.recv_json()
-        except ZMQError:
-            self._socket.close()
-            self._socket = self._create_socket()
-            return self._socket.recv_json()
+        return self._socket.recv_json()
 
     def send_json(self, data):
-        try:
-            self._socket.send_json(data)
-        except ZMQError:
-            self._socket.close()
-            self._socket = self._create_socket()
-            self._socket.send_json(data)
+        self._socket.send_json(data)
 
 
 def main():
