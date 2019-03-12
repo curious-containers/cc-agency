@@ -2,14 +2,16 @@ from time import time
 
 import jsonschema
 from flask import request, jsonify
-from werkzeug.exceptions import Unauthorized, NotFound, BadRequest
+from werkzeug.exceptions import Unauthorized, NotFound, BadRequest, InternalServerError
 from bson.objectid import ObjectId
 
 from cc_agency.commons.schemas.callback import callback_schema
 from cc_agency.commons.helper import batch_failure
+from cc_agency.commons.secrets import get_batch_secret_keys
+from cc_agency.commons.secrets import fill_batch_secrets
 
 
-def callback_routes(app, mongo, auth, conf, controller):
+def callback_routes(app, mongo, auth, conf, controller, trustee_client):
     @app.route('/callback/<batch_id>/<token>', methods=['GET'])
     def get_callback(batch_id, token):
         if not auth.verify_callback(batch_id, token):
@@ -20,6 +22,13 @@ def callback_routes(app, mongo, auth, conf, controller):
         )
         if not batch:
             raise NotFound('Object not found.')
+
+        batch_secret_keys = get_batch_secret_keys(batch)
+        response = trustee_client.collect(batch_secret_keys)
+        if response['state'] == 'failed':
+            raise InternalServerError('Trustee service failed:\n{}'.format(response['debug_info']))
+        batch_secrets = response['collected']
+        batch = fill_batch_secrets(batch, batch_secrets)
 
         experiment_id = batch['experimentId']
 

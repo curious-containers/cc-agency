@@ -3,7 +3,7 @@ from traceback import format_exc
 from time import time
 
 from flask import jsonify, request
-from werkzeug.exceptions import Unauthorized, BadRequest, NotFound
+from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
 from cc_core.commons.schemas.red import red_schema
@@ -12,6 +12,7 @@ from cc_core.commons.templates import inspect_templates_and_secrets
 from cc_core.commons.exceptions import exception_format
 
 from cc_agency.commons.helper import str_to_bool
+from cc_agency.commons.secrets import separate_secrets_batch, separate_secrets_experiment
 
 
 def _prepare_red_data(data, user):
@@ -40,6 +41,8 @@ def _prepare_red_data(data, user):
             'settings': stripped_settings
         }
 
+    experiment, secrets = separate_secrets_experiment(experiment)
+
     if 'batches' in data:
         raw_batches = data['batches']
     else:
@@ -51,7 +54,7 @@ def _prepare_red_data(data, user):
     batches = []
 
     for rb in raw_batches:
-        batches.append({
+        batch = {
             'username': user['username'],
             'registrationTime': timestamp,
             'state': 'registered',
@@ -68,12 +71,15 @@ def _prepare_red_data(data, user):
             'attempts': 0,
             'inputs': rb['inputs'],
             'outputs': rb['outputs']
-        })
+        }
+        batch, additional_secrets = separate_secrets_batch(batch)
+        secrets.update(additional_secrets)
+        batches.append(batch)
 
-    return experiment, batches
+    return experiment, batches, secrets
 
 
-def red_routes(app, mongo, auth, controller):
+def red_routes(app, mongo, auth, controller, trustee_client):
     @app.route('/red', methods=['POST'])
     def post_red():
         user = auth.verify_user(request.authorization)
@@ -122,7 +128,11 @@ def red_routes(app, mongo, auth, controller):
         except Exception:
             raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 
-        experiment, batches = _prepare_red_data(data, user)
+        experiment, batches, secrets = _prepare_red_data(data, user)
+
+        response = trustee_client.store(secrets)
+        if response['state'] == 'failed':
+            raise InternalServerError('Trustee service failed:\n{}'.format(response['debug_info']))
 
         bson_experiment_id = mongo.db['experiments'].insert_one(experiment).inserted_id
         experiment_id = str(bson_experiment_id)

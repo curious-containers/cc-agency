@@ -43,7 +43,7 @@ def create_kdf(salt):
     )
 
 
-def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
+def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_failed=False):
     bson_id = ObjectId(batch_id)
 
     batch = mongo.db['batches'].find_one(
@@ -58,7 +58,7 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf):
     new_state = 'registered'
     new_node = None
 
-    if attempts >= 2:
+    if attempts >= 2 or disable_retry_if_failed:
         new_state = 'failed'
         new_node = node_name
     else:

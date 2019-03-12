@@ -12,14 +12,17 @@ from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements
 from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mount_connectors_from_outputs
 
 from cc_agency.controller.docker import ClientProxy
-from cc_agency.commons.helper import create_kdf, calculate_agency_id
+from cc_agency.commons.helper import create_kdf, calculate_agency_id, batch_failure
 from cc_agency.commons.mnt_core import init_build_dir
+from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
+from cc_agency.commons.secrets import get_batch_secret_keys
 
 
 class Scheduler:
-    def __init__(self, conf, mongo):
+    def __init__(self, conf, mongo, trustee_client):
         self._conf = conf
         self._mongo = mongo
+        self._trustee_client = trustee_client
 
         self._agency_id = calculate_agency_id(conf)
 
@@ -86,27 +89,6 @@ class Scheduler:
             for t in threads:
                 t.join()
 
-    def _void_recursively(self, data, allowed_section):
-        if isinstance(data, dict):
-            result = {}
-            for key, val in data.items():
-                if allowed_section and (key == 'password' or key.startswith('_')):
-                    salt = self._agency_id
-                    kdf = create_kdf(salt.encode('utf-8'))
-                    val_hash = kdf.derive(val.encode('utf-8'))
-                    val_hash = hexlify(val_hash).decode('utf-8')
-                    result[key] = '{{' + val_hash[-8:] + '}}'
-                elif key in ['access', 'auth']:
-                    result[key] = self._void_recursively(val, True)
-                else:
-                    result[key] = self._void_recursively(val, allowed_section)
-
-            return result
-        elif isinstance(data, list):
-            return [self._void_recursively(val, allowed_section) for val in data]
-
-        return data
-
     def _notification_loop(self):
         while True:
             self._notification_q.get()
@@ -165,11 +147,11 @@ class Scheduler:
 
             for batch in cursor:
                 bson_id = batch['_id']
-                del batch['_id']
 
-                data = self._void_recursively(batch, False)
-                data['protectedKeysVoided'] = True
-                self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': data})
+                batch_secret_keys = get_batch_secret_keys(batch)
+                self._trustee_client.delete(batch_secret_keys)
+
+                self._mongo.db['batches'].update_one({'_id': bson_id}, {'$set': {'protectedKeysVoided': True}})
 
             # experiments
             cursor = self._mongo.db['experiments'].find(
@@ -190,9 +172,10 @@ class Scheduler:
                 })
 
                 if all_count == finished_count:
-                    data = self._void_recursively(experiment, False)
-                    data['protectedKeysVoided'] = True
-                    self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': data})
+                    experiment_secret_keys = get_experiment_secret_keys(experiment)
+                    self._trustee_client.delete(experiment_secret_keys)
+
+                    self._mongo.db['experiments'].update_one({'_id': bson_id}, {'$set': {'protectedKeysVoided': True}})
 
     def _scheduling_loop(self):
         while True:
@@ -358,6 +341,22 @@ class Scheduler:
                 )
                 experiments[experiment_id] = experiment
 
+            experiment_secret_keys = get_experiment_secret_keys(experiment)
+            response = self._trustee_client.collect(experiment_secret_keys)
+            if response['state'] == 'failed':
+                batch_failure(
+                    self._mongo,
+                    batch_id,
+                    response['debug_info'],
+                    None,
+                    self._conf,
+                    disable_retry_if_failed=True
+                )
+                continue
+
+            experiment_secrets = response['collected']
+            experiment = fill_experiment_secrets(experiment, experiment_secrets)
+
             ram = experiment['container']['settings']['ram']
 
             # limit the number of currently executed batches from a single experiment
@@ -410,30 +409,15 @@ class Scheduler:
             if not allow_insecure_capabilities and is_mounting:
                 # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
                 debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
-                             'configured to mount inside a docker container.\n{}'\
-                             .format(mount_connectors)
-                self._mongo.db['batches'].update_one(
-                    {'_id': batch['_id']},
-                    {
-                        '$set': {
-                            'state': 'failed',
-                            'node': selected_node['nodeName'],
-                            'usedGPUs': used_gpu_ids,
-                            'mount': is_mounting
-                        },
-                        '$push': {
-                            'history': {
-                                'state': 'failed',
-                                'time': timestamp,
-                                'debugInfo': debug_info,
-                                'node': selected_node['nodeName'],
-                                'ccagent': None
-                            }
-                        },
-                        '$inc': {
-                            'attempts': 1
-                        }
-                    }
+                             'configured to mount inside a docker container.\n{}' \
+                    .format(mount_connectors)
+                batch_failure(
+                    self._mongo,
+                    batch_id,
+                    debug_info,
+                    None,
+                    self._conf,
+                    disable_retry_if_failed=True
                 )
                 continue
 

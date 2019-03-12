@@ -6,6 +6,7 @@ from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
 from cc_agency.commons.db import Mongo
+from cc_agency.commons.secrets import TrusteeClient
 from cc_agency.controller.scheduler import Scheduler
 
 
@@ -26,7 +27,8 @@ def main():
     # Singletons
     conf = Conf(args.conf_file)
     mongo = Mongo(conf)
-    scheduler = Scheduler(conf, mongo)
+    trustee_client = TrusteeClient(conf)
+    scheduler = Scheduler(conf, mongo, trustee_client)
 
     bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
     bind_socket_dir, _ = os.path.split(bind_socket_path)

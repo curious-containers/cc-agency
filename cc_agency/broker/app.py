@@ -9,6 +9,7 @@ from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
 from cc_agency.commons.db import Mongo
+from cc_agency.commons.secrets import TrusteeClient
 from cc_agency.broker.auth import Auth
 from cc_agency.broker.routes.red import red_routes
 from cc_agency.broker.routes.nodes import nodes_routes
@@ -31,6 +32,7 @@ args = parser.parse_args()
 conf = Conf(args.conf_file)
 mongo = Mongo(conf)
 auth = Auth(conf, mongo)
+trustee_client = TrusteeClient(conf)
 
 bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
 bind_socket = 'ipc://{}'.format(bind_socket_path)
@@ -57,9 +59,9 @@ def get_version():
     })
 
 
-red_routes(app, mongo, auth, controller)
+red_routes(app, mongo, auth, controller, trustee_client)
 nodes_routes(app, mongo, auth, conf)
-callback_routes(app, mongo, auth, conf, controller)
+callback_routes(app, mongo, auth, conf, controller, trustee_client)
 auth_routes(app, auth, conf)
 
 controller.send_json({'destination': 'scheduler'})

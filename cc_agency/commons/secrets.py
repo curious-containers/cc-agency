@@ -9,40 +9,42 @@ import zmq
 from zmq.error import ZMQError
 
 
-def separate_secrets(red):
-    red = deepcopy(red)
+def separate_secrets_batch(batch):
+    batch = deepcopy(batch)
     secrets = {}
     reversed_secrets = {}  # only for deduplication
 
-    if 'auth' in red['container']['settings']['image']:
+    for io in ['inputs', 'outputs']:
+        for cwl_key, cwl_val in batch[io].items():
+            if not isinstance(cwl_val, dict):
+                continue
+            secret = cwl_val['connector']['access']
+            dumped = json.dumps(secret, sort_keys=True)
+            if dumped in reversed_secrets:
+                key = reversed_secrets[dumped]
+            else:
+                key = str(uuid4())
+                reversed_secrets[dumped] = key
+                secrets[key] = secret
+
+            cwl_val['connector']['access'] = key
+
+    return batch, secrets
+
+
+def separate_secrets_experiment(experiment):
+    experiment = deepcopy(experiment)
+    secrets = {}
+    reversed_secrets = {}  # only for deduplication
+
+    if 'auth' in experiment['container']['settings']['image']:
         key = str(uuid4())
-        secret = red['container']['settings']['image']['auth']
-        red['container']['settings']['image']['auth'] = key
+        secret = experiment['container']['settings']['image']['auth']
+        experiment['container']['settings']['image']['auth'] = key
         secrets[key] = secret
         reversed_secrets[json.dumps(secret, sort_keys=True)] = key
 
-    if 'batches' in red:
-        batches = red['batches']
-    else:
-        batches = [{'inputs': red['inputs'], 'outputs': red['outputs']}]
-
-    for batch in batches:
-        for io in ['inputs', 'outputs']:
-            for cwl_key, cwl_val in batch[io].items():
-                if not isinstance(cwl_val, dict):
-                    continue
-                secret = cwl_val['connector']['access']
-                dumped = json.dumps(secret, sort_keys=True)
-                if dumped in reversed_secrets:
-                    key = reversed_secrets[dumped]
-                else:
-                    key = str(uuid4())
-                    reversed_secrets[dumped] = key
-                    secrets[key] = secret
-
-                cwl_val['connector']['access'] = key
-
-    return red, secrets
+    return experiment, secrets
 
 
 def get_batch_secret_keys(batch):
