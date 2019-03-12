@@ -25,26 +25,11 @@ class SocketWrapper:
             except Exception:
                 pass
 
-        self._socket = None
         self._socket = self._create_socket()
 
         atexit.register(self._socket.close)
 
     def _create_socket(self):
-        if self._socket is not None:
-            try:
-                self._socket.close()
-                print('Removed existing socket file.')
-            except Exception:
-                print('Could not close existing socket', file=sys.stderr)
-
-        if os.path.exists(self._bind_socket_path):
-            try:
-                os.remove(self._bind_socket_path)
-                print('Removed existing socket file.')
-            except Exception:
-                print('Could not remove existing socket file.', file=sys.stderr)
-
         old_umask = os.umask(0o077)
         context = zmq.Context()
         socket = context.socket(zmq.REP)
@@ -72,7 +57,7 @@ def main():
     socket = SocketWrapper(conf)
 
     secrets = {}
-    
+
     while True:
         data = socket.recv_json()
 
