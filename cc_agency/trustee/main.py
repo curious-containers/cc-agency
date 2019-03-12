@@ -73,10 +73,13 @@ def main():
 
     secrets = {}
 
+    print('Enter loop:')
     while True:
+        print('loop ...')
         data = socket.recv_json()
 
         action = data['action']
+        print('action:', action)
 
         if action == 'store':
             new_secrets = data['secrets']
