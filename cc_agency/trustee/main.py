@@ -22,16 +22,18 @@ def main():
 
     bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
     bind_socket_dir, _ = os.path.split(bind_socket_path)
-    os.umask(0o077)
+
     if not os.path.exists(bind_socket_dir):
         try:
             os.makedirs(bind_socket_dir)
         except Exception:
             pass
 
+    old_umask = os.umask(0o077)
     context = zmq.Context()
     socket = context.socket(zmq.REP)
     socket.bind('ipc://{}'.format(bind_socket_path))
+    os.umask(old_umask)
 
     secrets = {}
 
