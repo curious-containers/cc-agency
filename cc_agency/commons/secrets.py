@@ -100,7 +100,7 @@ class TrusteeClient:
     def store(self, secrets):
         return self._request({
             'action': 'store',
-            'keys': secrets
+            'secrets': secrets
         })
 
     def delete(self, keys):
