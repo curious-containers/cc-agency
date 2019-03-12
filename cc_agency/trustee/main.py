@@ -44,7 +44,7 @@ class SocketWrapper:
                 print('Removed existing socket file.')
             except Exception:
                 print('Could not remove existing socket file.', file=sys.stderr)
-        
+
         old_umask = os.umask(0o077)
         context = zmq.Context()
         socket = context.socket(zmq.REP)
@@ -121,3 +121,5 @@ def main():
                 'state': 'success',
                 'collected': collected
             })
+        else:
+            raise Exception('Invalid trustee action {}.'.format(data['action']))
