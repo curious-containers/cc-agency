@@ -19,6 +19,9 @@ from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure,
 from cc_agency.commons.mnt_core import build_dir_path, CC_CORE_IMAGE
 
 
+CURL_IMAGE = 'buildpack-deps:bionic-curl'
+
+
 class ClientProxy:
     def __init__(self, node_name, conf, mongo):
         self._node_name = node_name
@@ -228,19 +231,10 @@ class ClientProxy:
     def _inspect(self):
         print('Node inspection:', self._node_name)
 
-        command = interpreter_command()
-        command += [
-            '-m',
-            'cc_core.agent.connected',
-            self._external_url,
-            '--inspect'
-        ]
-
-        command = ' '.join([str(c) for c in command])
-        command = "/bin/sh -c '{}'".format(command)
+        command = 'curl -f {}'.format(self._external_url)
 
         self._client.containers.run(
-            CC_CORE_IMAGE,
+            CURL_IMAGE,
             command,
             user='1000:1000',
             remove=True,
