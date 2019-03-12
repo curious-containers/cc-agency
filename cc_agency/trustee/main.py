@@ -72,14 +72,11 @@ def main():
     socket = SocketWrapper(conf)
 
     secrets = {}
-
-    print('Enter loop:')
+    
     while True:
-        print('loop ...')
         data = socket.recv_json()
 
         action = data['action']
-        print('action:', action)
 
         if action == 'store':
             new_secrets = data['secrets']
@@ -91,6 +88,10 @@ def main():
                     })
                     continue
             secrets.update(new_secrets)
+
+            socket.send_json({
+                'state': 'success'
+            })
 
         elif action == 'delete':
             keys = data['keys']
