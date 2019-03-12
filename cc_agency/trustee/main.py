@@ -3,11 +3,52 @@ import sys
 from argparse import ArgumentParser
 
 import zmq
+from zmq.error import ZMQError
 
 from cc_agency.commons.conf import Conf
 
 
 DESCRIPTION = 'CC-Agency Trustee'
+
+
+class SocketWrapper:
+    def __init__(self, conf):
+        self._conf = conf
+        self._bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
+        self._bind_socket_dir, _ = os.path.split(self._bind_socket_path)
+        self._bind_socket_ipc_path = 'ipc://{}'.format(self._bind_socket_path)
+
+        if not os.path.exists(self._bind_socket_dir):
+            try:
+                os.makedirs(self._bind_socket_dir)
+            except Exception:
+                pass
+
+        self._socket = self._create_socket()
+
+    def _create_socket(self):
+        old_umask = os.umask(0o077)
+        context = zmq.Context()
+        socket = context.socket(zmq.REP)
+        socket.bind('ipc://{}'.format(self._bind_socket_ipc_path))
+        os.umask(old_umask)
+        return socket
+
+    def recv_json(self):
+        try:
+            return self._socket.recv_json()
+        except ZMQError:
+            self._socket.close()
+            self._socket = self._create_socket()
+            return self._socket.recv_json()
+
+    def send_json(self, data):
+        try:
+            self._socket.send_json(data)
+        except ZMQError:
+            self._socket.close()
+            self._socket = self._create_socket()
+            self._socket.send_json(data)
 
 
 def main():
@@ -20,20 +61,7 @@ def main():
 
     conf = Conf(args.conf_file)
 
-    bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
-    bind_socket_dir, _ = os.path.split(bind_socket_path)
-
-    if not os.path.exists(bind_socket_dir):
-        try:
-            os.makedirs(bind_socket_dir)
-        except Exception:
-            pass
-
-    old_umask = os.umask(0o077)
-    context = zmq.Context()
-    socket = context.socket(zmq.REP)
-    socket.bind('ipc://{}'.format(bind_socket_path))
-    os.umask(old_umask)
+    socket = SocketWrapper(conf)
 
     secrets = {}
 
