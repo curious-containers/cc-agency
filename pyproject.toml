@@ -24,4 +24,5 @@ requests = "^2.18"
 
 [tool.poetry.scripts]
 ccagency-controller = 'cc_agency.controller.main:main'
+ccagency-trustee = 'cc_agency.trustee.main:main'
 ccagency = 'cc_agency.tools.main:main'

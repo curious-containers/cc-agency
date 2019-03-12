@@ -6,7 +6,7 @@ broker:
     tokens_valid_for_seconds: 86400  # 24 h
 
 controller:
-  bind_socket_path: "~/.cache/cc-agency/controller.ipc"
+  bind_socket_path: "~/.cache/cc-agency-controller.sock"
   docker:
     nodes:
       node1:
@@ -15,7 +15,7 @@ controller:
     strategy: 'spread'
 
 trustee:
-  bind_socket_path: '~/.cache/cc-agency/trustee.ipc'
+  bind_socket_path: '~/.cache/cc-agency-trustee.sock'
 
 mongo:
   db: "ccagency"
