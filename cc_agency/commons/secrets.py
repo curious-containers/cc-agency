@@ -119,9 +119,9 @@ class TrusteeClient:
         while True:
             try:
                 self._trustee.send_json(d)
+                break
             except ZMQError:
                 print('PID {} could not send {} request to trustee.'.format(os.getpid(), d['action']))
                 sleep(random())
-                continue
 
-            return self._trustee.recv_json()
+        return self._trustee.recv_json()

@@ -1,5 +1,7 @@
 import os
 from argparse import ArgumentParser
+import atexit
+
 import zmq
 
 from cc_core.version import VERSION as CORE_VERSION
@@ -44,6 +46,8 @@ def main():
     socket = context.socket(zmq.PULL)
     socket.bind('ipc://{}'.format(bind_socket_path))
     os.umask(old_umask)
+
+    atexit.register(socket.close)
 
     while True:
         data = socket.recv_json()
