@@ -32,7 +32,10 @@ def main():
     bind_socket_dir, _ = os.path.split(bind_socket_path)
     os.umask(0o077)
     if not os.path.exists(bind_socket_dir):
-        os.makedirs(bind_socket_dir)
+        try:
+            os.makedirs(bind_socket_dir)
+        except Exception:
+            pass
 
     context = zmq.Context()
     socket = context.socket(zmq.PULL)
