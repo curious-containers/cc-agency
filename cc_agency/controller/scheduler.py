@@ -268,7 +268,7 @@ class Scheduler:
             {
                 'node': {'$in': node_names},
                 'state': {'$in': ['scheduled', 'processing']}},
-            {'experimentId': 1, 'node': 1}
+            {'experimentId': 1, 'node': 1, 'usedGPUs': 1}
         )
         batches = list(cursor)
         experiment_ids = list(set([ObjectId(b['experimentId']) for b in batches]))
