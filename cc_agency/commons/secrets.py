@@ -1,12 +1,13 @@
 import os
 import json
-from time import sleep
-from random import random
 from copy import deepcopy
 from uuid import uuid4
 
 import zmq
-from zmq.error import ZMQError
+from zmq.error import ZMQError, Again
+
+
+_RECEIVE_TIMEOUT = 2000
 
 
 def separate_secrets_batch(batch):
@@ -90,12 +91,17 @@ class TrusteeClient:
     def __init__(self, conf):
         self._conf = conf
 
-        bind_socket = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
-        bind_socket = 'ipc://{}'.format(bind_socket)
+        self._bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
+        self._bind_socket_ipc_path = 'ipc://{}'.format(self._bind_socket_path)
 
+        self._socket = self._connect_socket()
+
+    def _connect_socket(self):
         context = zmq.Context()
-        self._trustee = context.socket(zmq.REQ)
-        self._trustee.connect(bind_socket)
+        socket = context.socket(zmq.REQ)
+        socket.setsockopt(zmq.RCVTIMEO, _RECEIVE_TIMEOUT)
+        socket.connect(self._bind_socket_ipc_path)
+        return socket
 
     def store(self, secrets):
         return self._request({
@@ -115,13 +121,22 @@ class TrusteeClient:
             'keys': keys
         })
 
-    def _request(self, d):
-        while True:
-            try:
-                self._trustee.send_json(d)
-                break
-            except ZMQError:
-                print('PID {} could not send {} request to trustee.'.format(os.getpid(), d['action']))
-                sleep(random())
+    def inspect(self):
+        return self._request({
+            'action': 'inspect'
+        })
 
-        return self._trustee.recv_json()
+    def _request(self, d):
+        try:
+            self._socket.send_json(d)
+        except ZMQError as e:
+            debug_info = '{}:{}{}'.format(repr(e), os.linesep, e)
+            self._socket = self._connect_socket()
+            return {'state': 'failed', 'debug_info': debug_info, 'disable_retry': False, 'inspect': True}
+
+        try:
+            return self._socket.recv_json()
+        except (ZMQError, Again) as e:
+            debug_info = '{}:{}{}'.format(repr(e), os.linesep, e)
+            self._socket = self._connect_socket()
+            return {'state': 'failed', 'debug_info': debug_info, 'disable_retry': False, 'inspect': True}

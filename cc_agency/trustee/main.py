@@ -63,13 +63,20 @@ def main():
 
         action = data['action']
 
-        if action == 'store':
+        if action == 'inspect':
+            socket.send_json({
+                'state': 'success'
+            })
+
+        elif action == 'store':
             new_secrets = data['secrets']
             for key in new_secrets:
                 if key in secrets:
                     socket.send_json({
                         'state': 'failed',
-                        'debug_info': 'Key {} exists'.format(key)
+                        'debug_info': 'Key {} already exists'.format(key),
+                        'disable_retry': False,
+                        'inspect': False
                     })
                     continue
             secrets.update(new_secrets)
@@ -80,14 +87,9 @@ def main():
 
         elif action == 'delete':
             keys = data['keys']
-            failed = []
             for key in keys:
                 if key in secrets:
                     del secrets[key]
-                else:
-                    failed.append(secrets)
-            if failed:
-                print('Failed to delete keys: {}'.format(keys), file=sys.stderr)
 
             socket.send_json({
                 'state': 'success'
@@ -102,7 +104,9 @@ def main():
                 else:
                     socket.send_json({
                         'state': 'failed',
-                        'debug_info': 'Could not collect secret with key {}'.format(key)
+                        'debug_info': 'Could not collect secret with key {}'.format(key),
+                        'disable_retry': True,
+                        'inspect': False
                     })
                     continue
 
@@ -110,5 +114,3 @@ def main():
                 'state': 'success',
                 'collected': collected
             })
-        else:
-            raise Exception('Invalid trustee action {}.'.format(data['action']))

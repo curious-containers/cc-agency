@@ -1,8 +1,8 @@
+import os
 import sys
 from threading import Thread
 from queue import Queue, Full
 from time import time, sleep
-from binascii import hexlify
 from traceback import format_exc
 
 import requests
@@ -12,10 +12,13 @@ from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements
 from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mount_connectors_from_outputs
 
 from cc_agency.controller.docker import ClientProxy
-from cc_agency.commons.helper import create_kdf, calculate_agency_id, batch_failure
+from cc_agency.commons.helper import calculate_agency_id, batch_failure
 from cc_agency.commons.mnt_core import init_build_dir
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
 from cc_agency.commons.secrets import get_batch_secret_keys
+
+
+_CRON_INTERVAL = 60
 
 
 class Scheduler:
@@ -60,7 +63,7 @@ class Scheduler:
             if batch:
                 self.schedule()
 
-            sleep(60)
+            sleep(_CRON_INTERVAL)
 
     def schedule(self):
         try:
@@ -130,8 +133,9 @@ class Scheduler:
                 try:
                     r = requests.post(hook['url'], auth=auth, json=payload)
                     r.raise_for_status()
-                except Exception:
-                    print(format_exc(), file=sys.stderr)
+                except Exception as e:
+                    debug_info = 'Notification post hook failed:{0}{1}{0}{2}'.format(os.linesep, repr(e), e)
+                    print(debug_info, file=sys.stderr)
 
     def _voiding_loop(self):
         while True:
@@ -198,6 +202,16 @@ class Scheduler:
                 self._notification_q.put_nowait(None)
             except Full:
                 pass
+
+            # inspect trustee
+            response = self._trustee_client.inspect()
+            if response['state'] == 'failed':
+                debug_info = response['debug_info']
+                print('Trustee service unavailable, retry in {} seconds:{}{}'.format(
+                    _CRON_INTERVAL, os.linesep, debug_info
+                ), file=sys.stderr)
+                sleep(_CRON_INTERVAL)
+                continue
 
             self._schedule_batches()
 
@@ -350,8 +364,16 @@ class Scheduler:
                     response['debug_info'],
                     None,
                     self._conf,
-                    disable_retry_if_failed=True
+                    disable_retry_if_failed=response.get('disable_retry')
                 )
+
+                if response.get('inspect'):
+                    response = self._trustee_client.inspect()
+                    if response['state'] == 'failed':
+                        debug_info = response['debug_info']
+                        print('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
+                        break
+
                 continue
 
             experiment_secrets = response['collected']
@@ -409,8 +431,8 @@ class Scheduler:
             if not allow_insecure_capabilities and is_mounting:
                 # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
                 debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
-                             'configured to mount inside a docker container.\n{}' \
-                    .format(mount_connectors)
+                             'configured to mount inside a docker container.{}{}' \
+                    .format(os.linesep, mount_connectors)
                 batch_failure(
                     self._mongo,
                     batch_id,

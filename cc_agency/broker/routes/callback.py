@@ -28,7 +28,8 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
 
         if response['state'] == 'failed':
             debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
-            batch_failure(mongo, batch_id, debug_info, None, conf, disable_retry_if_failed=True)
+            disable_retry = response.get('disable_retry')
+            batch_failure(mongo, batch_id, debug_info, None, conf, disable_retry_if_failed=disable_retry)
             raise NotFound(debug_info)
 
         batch_secrets = response['collected']
