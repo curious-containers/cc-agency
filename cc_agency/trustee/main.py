@@ -67,25 +67,33 @@ def main():
             socket.send_json({
                 'state': 'success'
             })
+            continue
 
-        elif action == 'store':
+        if action == 'store':
             new_secrets = data['secrets']
+            existing_keys = []
+
             for key in new_secrets:
                 if key in secrets:
-                    socket.send_json({
-                        'state': 'failed',
-                        'debug_info': 'Key {} already exists'.format(key),
-                        'disable_retry': False,
-                        'inspect': False
-                    })
-                    continue
+                    existing_keys.append(key)
+
+            if existing_keys:
+                socket.send_json({
+                    'state': 'failed',
+                    'debug_info': 'Keys already exist: {}'.format(existing_keys),
+                    'disable_retry': False,
+                    'inspect': False
+                })
+                continue
+
             secrets.update(new_secrets)
 
             socket.send_json({
                 'state': 'success'
             })
+            continue
 
-        elif action == 'delete':
+        if action == 'delete':
             keys = data['keys']
             for key in keys:
                 if key in secrets:
@@ -94,23 +102,36 @@ def main():
             socket.send_json({
                 'state': 'success'
             })
+            continue
 
-        elif action == 'collect':
+        if action == 'collect':
             keys = data['keys']
             collected = {}
+            missing_keys = []
             for key in keys:
                 if key in secrets:
                     collected[key] = secrets[key]
                 else:
-                    socket.send_json({
-                        'state': 'failed',
-                        'debug_info': 'Could not collect secret with key {}'.format(key),
-                        'disable_retry': True,
-                        'inspect': False
-                    })
-                    continue
+                    missing_keys.append(key)
+
+            if missing_keys:
+                socket.send_json({
+                    'state': 'failed',
+                    'debug_info': 'Could not collect keys: {}'.format(missing_keys),
+                    'disable_retry': True,
+                    'inspect': False
+                })
+                continue
 
             socket.send_json({
                 'state': 'success',
                 'collected': collected
             })
+            continue
+
+        socket.send_json({
+            'state': 'failed',
+            'debug_info': 'Unknown trustee action.',
+            'disable_retry': False,
+            'inspect': False
+        })
