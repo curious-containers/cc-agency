@@ -121,10 +121,12 @@ conf_schema = {
         'trustee': {
             'type': 'object',
             'properties': {
-                'bind_socket_path': {'type': 'string'}
+                'internal_url': {'type': 'string'},
+                'username': {'type': 'string'},
+                'password': {'type': 'string'}
             },
             'additionalProperties': False,
-            'required': ['bind_socket_path']
+            'required': ['internal_url', 'username', 'password']
         },
         'mongo': {
             'type': 'object',

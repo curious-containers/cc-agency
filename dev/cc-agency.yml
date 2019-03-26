@@ -15,7 +15,9 @@ controller:
     strategy: 'spread'
 
 trustee:
-  bind_socket_path: '~/.cache/cc-agency-trustee.sock'
+  internal_url: 'http://127.0.0.1:6001'
+  username: "cctrustee"
+  password: "SECRET"
 
 mongo:
   db: "ccagency"

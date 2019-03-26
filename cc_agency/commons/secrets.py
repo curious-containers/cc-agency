@@ -3,8 +3,7 @@ import json
 from copy import deepcopy
 from uuid import uuid4
 
-import zmq
-from zmq.error import ZMQError, Again
+import requests
 
 
 _RECEIVE_TIMEOUT = 2000
@@ -89,54 +88,52 @@ def fill_experiment_secrets(experiment, secrets):
 
 class TrusteeClient:
     def __init__(self, conf):
-        self._conf = conf
-
-        self._bind_socket_path = os.path.expanduser(conf.d['trustee']['bind_socket_path'])
-        self._bind_socket_ipc_path = 'ipc://{}'.format(self._bind_socket_path)
-
-        self._socket = self._connect_socket()
-
-    def _connect_socket(self):
-        context = zmq.Context()
-        socket = context.socket(zmq.REQ)
-        socket.setsockopt(zmq.RCVTIMEO, _RECEIVE_TIMEOUT)
-        socket.connect(self._bind_socket_ipc_path)
-        return socket
+        self._url = conf.d['trustee']['internal_url'].rstrip('/')
+        self._auth = (conf.d['trustee']['username'], conf.d['trustee']['password'])
 
     def store(self, secrets):
-        return self._request({
-            'action': 'store',
-            'secrets': secrets
-        })
+        r = requests.post(
+            '{}/secrets'.format(self._url),
+            auth=self._auth,
+            json=secrets
+        )
+        return self._evaluate_request(r)
 
     def delete(self, keys):
-        return self._request({
-            'action': 'delete',
-            'keys': keys
-        })
+        r = requests.delete(
+            '{}/secrets'.format(self._url),
+            auth=self._auth,
+            json=keys
+        )
+        return self._evaluate_request(r)
 
     def collect(self, keys):
-        return self._request({
-            'action': 'collect',
-            'keys': keys
-        })
+        r = requests.get(
+            '{}/secrets'.format(self._url),
+            auth=self._auth,
+            json=keys
+        )
+        return self._evaluate_request(r)
 
     def inspect(self):
-        return self._request({
-            'action': 'inspect'
-        })
+        r = requests.get(
+            '{}/'.format(self._url),
+            auth=self._auth
+        )
+        return self._evaluate_request(r)
 
-    def _request(self, d):
+    @staticmethod
+    def _evaluate_request(r):
         try:
-            self._socket.send_json(d)
-        except ZMQError as e:
+            r.raise_for_status()
+            data = r.json()
+        except Exception as e:
             debug_info = '{}:{}{}'.format(repr(e), os.linesep, e)
-            self._socket = self._connect_socket()
-            return {'state': 'failed', 'debug_info': debug_info, 'disable_retry': False, 'inspect': True}
+            return {
+                'state': 'failed',
+                'debug_info': debug_info,
+                'disable_retry': False,
+                'inspect': True
+            }
 
-        try:
-            return self._socket.recv_json()
-        except (ZMQError, Again) as e:
-            debug_info = '{}:{}{}'.format(repr(e), os.linesep, e)
-            self._socket = self._connect_socket()
-            return {'state': 'failed', 'debug_info': debug_info, 'disable_retry': False, 'inspect': True}
+        return data
