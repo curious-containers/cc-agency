@@ -32,7 +32,7 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
             batch_failure(mongo, batch_id, debug_info, None, conf, disable_retry_if_failed=disable_retry)
             raise NotFound(debug_info)
 
-        batch_secrets = response['collected']
+        batch_secrets = response['secrets']
         batch = fill_batch_secrets(batch, batch_secrets)
 
         experiment_id = batch['experimentId']
