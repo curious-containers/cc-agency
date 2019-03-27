@@ -376,7 +376,7 @@ class Scheduler:
 
                 continue
 
-            experiment_secrets = response['collected']
+            experiment_secrets = response['secrets']
             experiment = fill_experiment_secrets(experiment, experiment_secrets)
 
             ram = experiment['container']['settings']['ram']
