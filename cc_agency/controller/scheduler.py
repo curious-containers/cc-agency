@@ -3,7 +3,6 @@ import sys
 from threading import Thread
 from queue import Queue, Full
 from time import time, sleep
-from traceback import format_exc
 
 import requests
 from bson.objectid import ObjectId
@@ -294,10 +293,13 @@ class Scheduler:
         experiments = {str(e['_id']): e for e in cursor}
 
         for node in nodes:
+            node_batches = list(filter(lambda batch: batch['node'] == node['nodeName'], batches))
+
+            num_batches = len(node_batches)
+
             used_ram = sum([
                 experiments[b['experimentId']]['container']['settings']['ram']
-                for b in batches
-                if b['node'] == node['nodeName']
+                for b in node_batches
             ])
 
             available_gpus = self._get_available_gpus(node, batches)
@@ -307,6 +309,8 @@ class Scheduler:
             node['freeRam'] = node['ram'] - used_ram
             node['scheduledImages'] = {}
             node['scheduledBatches'] = []
+            node['gpus'] = self._get_present_gpus(node['nodeName'])
+            node['numBatches'] = num_batches
 
         return nodes
 
@@ -334,9 +338,76 @@ class Scheduler:
 
         return True
 
+    @staticmethod
+    def _node_possibly_sufficient(node, experiment):
+        """
+        Returns True if the node could be sufficient for the experiment, even if the node does not have
+        sufficient hardware at the moment (because of running batches).
+        :param node: The node to check
+        :param experiment: The experiment for which the node is sufficient or not.
+        :return: True, if the node is possibly sufficient otherwise False
+        """
+        if node['ram'] < experiment['container']['settings']['ram']:
+            return False
+        try:
+            match_gpus(node['gpus'], experiment['container']['settings'].get('gpus'))
+        except InsufficientGPUError:
+            return False
+        return True
+
+    @staticmethod
+    def _check_nodes_possible_sufficient(nodes, experiment):
+        """
+        Returns True if a possibly sufficient node is found otherwise False
+        :param nodes: The nodes to check
+        :param experiment: The description of the experiment
+        :return: True if a possibly sufficient node is found otherwise False
+        """
+        for node in nodes:
+            if Scheduler._node_possibly_sufficient(node, experiment):
+                return True
+        return False
+
+    @staticmethod
+    def _get_best_node(nodes, experiment):
+        """
+        Returns the node, that fits best for the given experiment. If no node could be found returns None
+        :param nodes: The nodes, that are available for this experiment.
+        :param experiment: The description of the experiment
+        :return: The node that fits best for the given experiment. If no node fits at the moment None is returned.
+        """
+        # check sufficient nodes
+        sufficient_nodes = [node for node in nodes if Scheduler._node_sufficient(node, experiment)]
+        if not sufficient_nodes:
+            return None
+
+        # prefer nodes without GPUs
+        nodes_without_gpus = [node for node in sufficient_nodes if ('gpus' not in node)]
+        if nodes_without_gpus:
+            sufficient_nodes = nodes_without_gpus
+
+        # prefer nodes with few jobs
+        min_num_batches = None
+        nodes_with_few_batches = []
+        for node in sufficient_nodes:
+            if min_num_batches is None:
+                min_num_batches = node['numBatches']
+                nodes_with_few_batches.append(node)
+                continue
+
+            if node['numBatches'] < min_num_batches:
+                min_num_batches = node['numBatches']
+                nodes_with_few_batches = [node]
+            elif node['numBatches'] == min_num_batches:
+                nodes_with_few_batches.append(node)
+
+        # prefer nodes with less free ram
+        nodes_with_few_batches.sort(reverse=False, key=lambda n: n['freeRam'])
+
+        return nodes_with_few_batches[0]
+
     def _schedule_batches(self):
         nodes = self._online_nodes()
-        strategy = self._conf.d['controller']['scheduling']['strategy']
         timestamp = time()
 
         experiments = {}
@@ -391,18 +462,25 @@ class Scheduler:
             if batch_count >= concurrency_limit:
                 continue
 
-            # select node
-            possible_nodes = [node for node in nodes if Scheduler._node_sufficient(node, experiment)]
-
-            if len(possible_nodes) == 0:
+            # check impossible experiments
+            if not Scheduler._check_nodes_possible_sufficient(nodes, experiment):
+                debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"'\
+                    .format(batch['experimentId'])
+                batch_failure(
+                    self._mongo,
+                    batch_id,
+                    debug_info,
+                    None,
+                    self._conf,
+                    disable_retry_if_failed=True
+                )
                 continue
 
-            if strategy == 'spread':
-                possible_nodes.sort(reverse=True, key=lambda n: n['freeRam'])
-            elif strategy == 'binpack':
-                possible_nodes.sort(reverse=False, key=lambda n: n['freeRam'])
+            # select node
+            selected_node = Scheduler._get_best_node(nodes, experiment)
 
-            selected_node = possible_nodes[0]
+            if selected_node is None:
+                continue
 
             # calculate ram / gpus
             selected_node['freeRam'] -= ram
@@ -431,8 +509,7 @@ class Scheduler:
             if not allow_insecure_capabilities and is_mounting:
                 # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
                 debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
-                             'configured to mount inside a docker container.{}{}' \
-                    .format(os.linesep, mount_connectors)
+                             'configured to mount inside a docker container.{}{}'.format(os.linesep, mount_connectors)
                 batch_failure(
                     self._mongo,
                     batch_id,
@@ -527,3 +604,7 @@ class Scheduler:
         ])
         for b in cursor:
             yield b
+
+
+class InsufficientNodesException(Exception):
+    pass
