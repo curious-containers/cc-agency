@@ -1,10 +1,10 @@
-from cc_core.commons.schemas.common import pattern_key
+from cc_core.commons.schemas.common import PATTERN_KEY
 
 
 _files_schema = {
     'type': 'object',
     'patternProperties': {
-        pattern_key: {
+        PATTERN_KEY: {
             'type': 'object',
             'properties': {
                 'isOptional': {'type': 'boolean'},

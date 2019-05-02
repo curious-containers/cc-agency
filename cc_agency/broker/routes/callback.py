@@ -9,6 +9,7 @@ from cc_agency.commons.schemas.callback import callback_schema
 from cc_agency.commons.helper import batch_failure
 from cc_agency.commons.secrets import get_batch_secret_keys
 from cc_agency.commons.secrets import fill_batch_secrets
+from cc_core.commons.red_to_blue import convert_red_to_blue
 
 
 def callback_routes(app, mongo, auth, conf, controller, trustee_client):
@@ -48,7 +49,9 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
             'outputs': batch['outputs']
         }
 
-        return jsonify(result)
+        blue_batches = convert_red_to_blue(result)
+
+        return jsonify(blue_batches[0])
 
     @app.route('/callback/<batch_id>/<token>', methods=['POST'])
     def post_callback(batch_id, token):

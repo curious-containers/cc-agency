@@ -1,22 +1,18 @@
 import os
-import shutil
 from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
-import tempfile
 from uuid import uuid4
 
 import docker
-from docker.errors import APIError
 from bson.objectid import ObjectId
 
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
-from cc_core.commons.mnt_core import CC_DIR, interpreter_command
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
-from cc_agency.commons.mnt_core import build_dir_path, CC_CORE_IMAGE
+from cc_agency.commons.build_dir import build_dir_path
 
 
 CURL_IMAGE = 'buildpack-deps:bionic-curl'
@@ -47,7 +43,7 @@ class ClientProxy:
 
         # using hash of external url to distinguish between volume names created by different agency installations
         self._agency_id = calculate_agency_id(conf)
-        self._cc_core_volume = None
+        self._blue_agent_volume = None
 
         node = {
             'nodeName': node_name,
@@ -64,7 +60,7 @@ class ClientProxy:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
             self._fail_batches_without_assigned_container()  # in case of agency restart
-        except Exception:
+        except Exception as e:
             self._set_offline(format_exc())
             return
 
@@ -217,8 +213,8 @@ class ClientProxy:
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
-            if self._cc_core_volume is None:
-                self._init_cc_core(self._build_dir)
+            if self._blue_agent_volume is None:
+                self._init_blue_agent(self._build_dir)
             self._inspect()
         except Exception:
             self._client = None
@@ -283,11 +279,11 @@ class ClientProxy:
 
             if inspect:
                 try:
-                    if self._cc_core_volume is None:
-                        self._init_cc_core(self._build_dir)
+                    if self._blue_agent_volume is None:
+                        self._init_blue_agent(self._build_dir)
                     self._inspect()
-                except Exception:
-                    self._cc_core_volume = None
+                except Exception as e:
+                    self._blue_agent_volume = None
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
@@ -295,8 +291,8 @@ class ClientProxy:
             if not self._online:
                 return
 
-    def _init_cc_core(self, build_dir):
-        self._client.images.build(path=build_dir, tag='cc-core')
+    def _init_blue_agent(self, build_dir):
+        self._client.images.build(path=build_dir, tag='blue-agent')
 
         for volume in self._client.volumes.list():
             if volume.name.startswith(self._agency_id):
@@ -305,26 +301,25 @@ class ClientProxy:
                 except Exception:
                     pass
 
-        cc_core_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
+        blue_agent_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
 
         binds = {
-            cc_core_volume: {
+            blue_agent_volume: {
                 'bind': os.path.join('/vol'),
                 'mode': 'rw'
             }
         }
 
-        command = 'cp -R {} /vol'.format(os.path.join('/', CC_DIR, '*'))
-        command = "/bin/sh -c '{}'".format(command)
+        command = 'cp /cc/blue_agent.py /vol'
 
         self._client.containers.run(
-            CC_CORE_IMAGE,
+            'blue-agent',
             command,
             remove=True,
             volumes=binds
         )
 
-        self._cc_core_volume = cc_core_volume
+        self._blue_agent_volume = blue_agent_volume
 
     def _run_batch_container(self, batch_id):
         batch = self._mongo.db['batches'].find_one(
@@ -376,22 +371,21 @@ class ClientProxy:
             'timestamp': time()
         })
 
-        command = interpreter_command()
-        command += [
-            '-m',
-            'cc_core.agent.connected',
+        command = [
+            'python3',
+            '/cc/blue_agent.py',
+            '--outputs',
             '{}/callback/{}/{}'.format(self._external_url, batch_id, token)
         ]
 
         command = ' '.join([str(c) for c in command])
-        command = "/bin/sh -c '{}'".format(command)
 
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
 
         binds = {
-            self._cc_core_volume: {
-                'bind': os.path.join('/cc'),
+            self._blue_agent_volume: {
+                'bind': '/cc',
                 'mode': 'ro'
             }
         }

@@ -13,7 +13,7 @@ from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mo
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import calculate_agency_id, batch_failure
-from cc_agency.commons.mnt_core import init_build_dir
+from cc_agency.commons.build_dir import init_build_dir
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
 from cc_agency.commons.secrets import get_batch_secret_keys
 
