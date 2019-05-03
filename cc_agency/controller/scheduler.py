@@ -435,7 +435,7 @@ class Scheduler:
                     response['debug_info'],
                     None,
                     self._conf,
-                    disable_retry_if_failed=response.get('disable_retry')
+                    disable_retry_if_failed=True
                 )
 
                 if response.get('inspect'):
@@ -520,22 +520,16 @@ class Scheduler:
                 )
                 continue
 
-            # schedule image pull on selected node
-            disable_pull = False
-            if 'execution' in experiment:
-                disable_pull = experiment['execution']['settings'].get('disablePull', False)
+            image_data = [experiment['container']['settings']['image']['url']]
+            auth = experiment['container']['settings']['image'].get('auth')
+            if auth:
+                image_data += [auth['username'], auth['password']]
+            image_data = tuple(image_data)
 
-            if not disable_pull:
-                image_data = [experiment['container']['settings']['image']['url']]
-                auth = experiment['container']['settings']['image'].get('auth')
-                if auth:
-                    image_data += [auth['username'], auth['password']]
-                image_data = tuple(image_data)
+            if image_data not in selected_node['scheduledImages']:
+                selected_node['scheduledImages'][image_data] = []
 
-                if image_data not in selected_node['scheduledImages']:
-                    selected_node['scheduledImages'][image_data] = []
-
-                selected_node['scheduledImages'][image_data].append(batch_id)
+            selected_node['scheduledImages'][image_data].append(batch_id)
 
             # schedule batch on selected node
             selected_node['scheduledBatches'].append(batch)
