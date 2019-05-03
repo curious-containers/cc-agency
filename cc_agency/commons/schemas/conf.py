@@ -86,14 +86,6 @@ conf_schema = {
                     'additionalProperties': False,
                     'required': ['nodes']
                 },
-                'scheduling': {
-                    'type': 'object',
-                    'properties': {
-                        'strategy': {'enum': ['spread', 'binpack']}
-                    },
-                    'additionalProperties': False,
-                    'required': ['strategy']
-                },
                 'notification_hooks': {
                     'type': 'array',
                     'items': {
@@ -116,7 +108,7 @@ conf_schema = {
                 }
             },
             'additionalProperties': False,
-            'required': ['bind_socket_path', 'docker', 'scheduling']
+            'required': ['bind_socket_path', 'docker']
         },
         'trustee': {
             'type': 'object',
