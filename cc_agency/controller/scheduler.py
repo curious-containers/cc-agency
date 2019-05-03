@@ -20,6 +20,29 @@ from cc_agency.commons.secrets import get_batch_secret_keys
 _CRON_INTERVAL = 60
 
 
+class CompleteNode:
+    """
+    Represents a processing node inside a cluster.
+    """
+    def __init__(self, node_name, ram, gpus, ram_available, gpus_available, num_batches_running):
+        """
+        Initialises a new CompleteNode.
+        :param node_name: The name of the node given by the agency config.
+        :param ram: The amount of ram of this node.
+        :param gpus: The GPUs that are present on this node. Does include gpus, which are used by batches.
+        :param ram_available: The ram that is available. Given by the amount of ram of the node minus the amount of ram
+        used by batches.
+        :param gpus_available: The GPUs that are available and not used by batches.
+        :param num_batches_running: The number of batches currently running on the node.
+        """
+        self.node_name = node_name
+        self.ram = ram
+        self.gpus = gpus
+        self.ram_available = ram_available
+        self.gpus_available = gpus_available
+        self.num_batches_running = num_batches_running
+
+
 class Scheduler:
     def __init__(self, conf, mongo, trustee_client):
         self._conf = conf
@@ -268,10 +291,13 @@ class Scheduler:
 
         return [gpu for gpu in present_gpus if gpu.device_id not in busy_gpu_ids]
 
-    def _online_nodes(self):
+    def _get_cluster_state(self):
+        """
+        Returns a list of complete nodes, which are currently present in the cluster.
+        """
         cursor = self._mongo.db['nodes'].find(
-            {'state': 'online'},
-            {'ram': 1, 'nodeName': 1}
+            {},
+            {'online': 1, 'ram': 1, 'nodeName': 1}
         )
 
         nodes = list(cursor)
@@ -292,8 +318,11 @@ class Scheduler:
         )
         experiments = {str(e['_id']): e for e in cursor}
 
+        complete_nodes = []
+
         for node in nodes:
-            node_batches = list(filter(lambda batch: batch['node'] == node['nodeName'], batches))
+            node_name = node['nodeName']
+            node_batches = list(filter(lambda batch: batch['node'] == node_name, batches))
 
             num_batches = len(node_batches)
 
@@ -303,16 +332,19 @@ class Scheduler:
             ])
 
             available_gpus = self._get_available_gpus(node, batches)
-            if available_gpus:
-                node['availableGPUs'] = available_gpus
 
-            node['freeRam'] = node['ram'] - used_ram
-            node['scheduledImages'] = {}
-            node['scheduledBatches'] = []
-            node['gpus'] = self._get_present_gpus(node['nodeName'])
-            node['numBatches'] = num_batches
+            complete_node = CompleteNode(
+                node_name=node_name,
+                ram=node['ram'],
+                gpus=self._get_present_gpus(node['nodeName']),
+                ram_available=node['ram'] - used_ram,
+                gpus_available=available_gpus,
+                num_batches_running=num_batches,
+            )
 
-        return nodes
+            complete_nodes.append(complete_node)
+
+        return complete_nodes
 
     @staticmethod
     def _node_sufficient(node, experiment):
@@ -324,11 +356,11 @@ class Scheduler:
         :return: True, if the nodes hardware is sufficient for the experiment, otherwise False
         """
 
-        if node['freeRam'] < experiment['container']['settings']['ram']:
+        if node.ram_available < experiment['container']['settings']['ram']:
             return False
 
         # check gpus
-        available_gpus = node.get('availableGPUs')
+        available_gpus = node.gpus_available
         required_gpus = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
 
         try:
@@ -347,10 +379,10 @@ class Scheduler:
         :param experiment: The experiment for which the node is sufficient or not.
         :return: True, if the node is possibly sufficient otherwise False
         """
-        if node['ram'] < experiment['container']['settings']['ram']:
+        if node.ram < experiment['container']['settings']['ram']:
             return False
         try:
-            match_gpus(node['gpus'], experiment['container']['settings'].get('gpus'))
+            match_gpus(node.gpus, experiment['container']['settings'].get('gpus'))
         except InsufficientGPUError:
             return False
         return True
@@ -382,7 +414,7 @@ class Scheduler:
             return None
 
         # prefer nodes without GPUs
-        nodes_without_gpus = [node for node in sufficient_nodes if ('gpus' not in node)]
+        nodes_without_gpus = [node for node in sufficient_nodes if (not node.gpus)]
         if nodes_without_gpus:
             sufficient_nodes = nodes_without_gpus
 
@@ -391,23 +423,37 @@ class Scheduler:
         nodes_with_few_batches = []
         for node in sufficient_nodes:
             if min_num_batches is None:
-                min_num_batches = node['numBatches']
+                min_num_batches = node.num_batches_running
                 nodes_with_few_batches.append(node)
                 continue
 
-            if node['numBatches'] < min_num_batches:
-                min_num_batches = node['numBatches']
+            if node.num_batches_running < min_num_batches:
+                min_num_batches = node.num_batches_running
                 nodes_with_few_batches = [node]
-            elif node['numBatches'] == min_num_batches:
+            elif node.num_batches_running == min_num_batches:
                 nodes_with_few_batches.append(node)
 
         # prefer nodes with less free ram
-        nodes_with_few_batches.sort(reverse=False, key=lambda n: n['freeRam'])
+        nodes_with_few_batches.sort(reverse=False, key=lambda n: n.ram_available)
 
         return nodes_with_few_batches[0]
 
     def _schedule_batches(self):
-        nodes = self._online_nodes()
+        """
+        state before _schedule_batches:
+        There might be batches with state "registered" (given in _fifo()).
+        There might be nodes, that are online and capable of processing the given batches (given in _online_nodes()).
+
+        state after _schedule_batches:
+        ClientProxy is informed about batches, that are scheduled to the node which is associated with the ClientProxy.
+        ClientProxies are informed about which images to pull for the scheduled batches.
+        Batches with state "registered" at the beginning of _schedule_batches have state "scheduled" now.
+        """
+        # complete batches, that were assigned during the scheduling process
+        scheduled_batches = []
+        image_information = {}
+        batch_information = {}
+        nodes = self._get_cluster_state()
         timestamp = time()
 
         experiments = {}
@@ -483,12 +529,12 @@ class Scheduler:
                 continue
 
             # calculate ram / gpus
-            selected_node['freeRam'] -= ram
+            selected_node.ram_available -= ram
 
             used_gpu_ids = None
-            if "availableGPUs" in selected_node:
+            if selected_node.gpus_available:
                 gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
-                available_gpus = selected_node['availableGPUs']
+                available_gpus = selected_node.gpus_available
                 used_gpus = match_gpus(available_gpus, requirements=gpu_requirements)
 
                 used_gpu_ids = []
@@ -526,13 +572,19 @@ class Scheduler:
                 image_data += [auth['username'], auth['password']]
             image_data = tuple(image_data)
 
-            if image_data not in selected_node['scheduledImages']:
-                selected_node['scheduledImages'][image_data] = []
+            if selected_node.node_name not in image_information:
+                image_information[selected_node.node_name] = {}
 
-            selected_node['scheduledImages'][image_data].append(batch_id)
+            if image_data not in image_information[selected_node.node_name]:
+                image_information[selected_node.node_name][image_data] = []
+
+            image_information[selected_node.node_name][image_data].append(batch_id)
 
             # schedule batch on selected node
-            selected_node['scheduledBatches'].append(batch)
+            if selected_node.node_name not in batch_information:
+                batch_information[selected_node.node_name] = []
+
+            batch_information[selected_node.node_name].append(batch)
 
             # update batch data
             self._mongo.db['batches'].update_one(
@@ -540,7 +592,7 @@ class Scheduler:
                 {
                     '$set': {
                         'state': 'scheduled',
-                        'node': selected_node['nodeName'],
+                        'node': selected_node.node_name,
                         'usedGPUs': used_gpu_ids,
                         'mount': is_mounting
                     },
@@ -549,7 +601,7 @@ class Scheduler:
                             'state': 'scheduled',
                             'time': timestamp,
                             'debugInfo': None,
-                            'node': selected_node['nodeName'],
+                            'node': selected_node.node_name,
                             'ccagent': None
                         }
                     },
@@ -561,34 +613,36 @@ class Scheduler:
 
         # inform node ClientProxies
         for node in nodes:
-            node_name = node['nodeName']
+            node_name = node.node_name
             client_proxy = self._nodes[node_name]
             client_proxy.put_action({'action': 'clean_up'})
 
-            for image, required_by in node['scheduledImages'].items():
-                data = {
-                    'action': 'pull_image',
-                    'url': image[0],
-                    'required_by': required_by
-                }
-
-                if len(image) == 3:
-                    data['auth'] = {
-                        'username': image[1],
-                        'password': image[2]
+            if node_name in image_information:
+                for image, required_by in image_information[node_name].items():
+                    data = {
+                        'action': 'pull_image',
+                        'url': image[0],
+                        'required_by': required_by
                     }
 
-                client_proxy.put_action(data)
+                    if len(image) == 3:
+                        data['auth'] = {
+                            'username': image[1],
+                            'password': image[2]
+                        }
 
-            for batch in node['scheduledBatches']:
-                batch_id = str(batch['_id'])
+                    client_proxy.put_action(data)
 
-                data = {
-                    'action': 'run_batch_container',
-                    'batch_id': batch_id
-                }
+            if node_name in batch_information:
+                for batch in batch_information[node_name]:
+                    batch_id = str(batch['_id'])
 
-                client_proxy.put_action(data)
+                    data = {
+                        'action': 'run_batch_container',
+                        'batch_id': batch_id
+                    }
+
+                    client_proxy.put_action(data)
 
     def _fifo(self):
         cursor = self._mongo.db['batches'].aggregate([
