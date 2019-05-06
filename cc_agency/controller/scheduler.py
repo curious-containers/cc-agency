@@ -368,11 +368,10 @@ class Scheduler:
             return False
 
         # check gpus
-        available_gpus = node.gpus_available
-        required_gpus = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
+        gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
 
         try:
-            match_gpus(available_gpus, required_gpus)
+            gpus = match_gpus(node.gpus_available, gpu_requirements)
         except InsufficientGPUError:
             return False
 
@@ -387,8 +386,6 @@ class Scheduler:
         :param experiment: The experiment for which the node is sufficient or not.
         :return: True, if the node is possibly sufficient otherwise False
         """
-        if not node.online:
-            return False
         if node.ram < experiment['container']['settings']['ram']:
             return False
         try:
@@ -398,7 +395,7 @@ class Scheduler:
         return True
 
     @staticmethod
-    def _check_nodes_possible_sufficient(nodes, experiment):
+    def _check_nodes_possibly_sufficient(nodes, experiment):
         """
         Returns True if a possibly sufficient node is found otherwise False
         :param nodes: The nodes to check
@@ -575,7 +572,7 @@ class Scheduler:
             return None, None
 
         # check impossible experiments
-        if not Scheduler._check_nodes_possible_sufficient(nodes, experiment):
+        if not Scheduler._check_nodes_possibly_sufficient(nodes, experiment):
             debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"' \
                 .format(next_batch['experimentId'])
             batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=True)
