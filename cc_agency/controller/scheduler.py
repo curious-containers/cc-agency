@@ -462,23 +462,27 @@ class Scheduler:
         Batches with state "registered" at the beginning of _schedule_batches have state "scheduled" now.
         """
         # complete batches, that were assigned during the scheduling process
-        scheduled_batches = []
         image_information = {}
-        batch_information = {}
         cluster_nodes = self._get_cluster_state()
 
         experiment_cache = {}
 
         # select batch to be scheduled
         for next_batch in self._fifo():
-            scheduled_batch = self._schedule_batch(next_batch,
-                                                   cluster_nodes,
-                                                   experiment_cache,
-                                                   image_information,
-                                                   batch_information)
-            if scheduled_batch is not None:
+            batch_id = str(next_batch['_id'])
+            node_name, node_image = self._schedule_batch(
+                next_batch,
+                cluster_nodes,
+                experiment_cache,
+            )
+            if node_name is not None:
                 cluster_nodes = self._get_cluster_state()
-                scheduled_batches.append(scheduled_batch)
+
+                if node_name not in image_information:
+                    image_information[node_name] = {}
+                if node_image not in image_information[node_name]:
+                    image_information[node_name][node_image] = []
+                image_information[node_name][node_image].append(batch_id)
 
         # inform node ClientProxies
         for cluster_node in cluster_nodes:
@@ -503,21 +507,38 @@ class Scheduler:
                         }
 
                     if not client_proxy.put_action(data):
+                        debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
+                            node_name
+                        )
+                        for batch_id in required_by:
+                            batch_failure(
+                                self._mongo,
+                                batch_id,
+                                debug_info,
+                                None,
+                                self._conf
+                            )
                         continue
 
-            if node_name in batch_information:
-                for next_batch in batch_information[node_name]:
-                    batch_id = str(next_batch['_id'])
+                    for batch_id in required_by:
+                        data = {
+                            'action': 'run_batch_container',
+                            'batch_id': batch_id
+                        }
 
-                    data = {
-                        'action': 'run_batch_container',
-                        'batch_id': batch_id
-                    }
+                        if not client_proxy.put_action(data):
+                            debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
+                                node_name
+                            )
+                            batch_failure(
+                                self._mongo,
+                                batch_id,
+                                debug_info,
+                                None,
+                                self._conf
+                            )
 
-                    if not client_proxy.put_action(data):
-                        continue
-
-    def _schedule_batch(self, next_batch, nodes, experiment_cache, image_information, batch_information):
+    def _schedule_batch(self, next_batch, nodes, experiment_cache):
         """
         Tries to find a node that is capable of processing the given batch. If no capable node could be found, None is
         returned.
@@ -527,7 +548,11 @@ class Scheduler:
         :param nodes: The nodes on which the batch should be scheduled.
         :param experiment_cache: A dictionary mapping experiment ids to actual experiments to cache secret values of
         experiments.
-        :return: The batch also containing information about the experiment.
+        :return: A tuple containing node_name, node_image
+        node_name: string representing the node
+        node_image: Tuple (docker_image_url, username, password) where username, password is optional.
+
+        If the batch could not be scheduled (None, None) is returned
         :raise TrusteeServiceError: If the trustee service is unavailable.
         """
         batch_id = str(next_batch['_id'])
@@ -547,20 +572,20 @@ class Scheduler:
         })
 
         if batch_count >= concurrency_limit:
-            return None
+            return None, None
 
         # check impossible experiments
         if not Scheduler._check_nodes_possible_sufficient(nodes, experiment):
             debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"' \
                 .format(next_batch['experimentId'])
             batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=True)
-            return None
+            return None, None
 
         # select node
         selected_node = Scheduler._get_best_node(nodes, experiment)
 
         if selected_node is None:
-            return None
+            return None, None
 
         # calculate ram / gpus
         selected_node.ram_available -= ram
@@ -594,27 +619,13 @@ class Scheduler:
                 self._conf,
                 disable_retry_if_failed=True
             )
-            return None
+            return None, None
 
-        image_data = [experiment['container']['settings']['image']['url']]
+        node_image = [experiment['container']['settings']['image']['url']]
         auth = experiment['container']['settings']['image'].get('auth')
         if auth:
-            image_data += [auth['username'], auth['password']]
-        image_data = tuple(image_data)
-
-        if selected_node.node_name not in image_information:
-            image_information[selected_node.node_name] = {}
-
-        if image_data not in image_information[selected_node.node_name]:
-            image_information[selected_node.node_name][image_data] = []
-
-        image_information[selected_node.node_name][image_data].append(batch_id)
-
-        # schedule batch on selected node
-        if selected_node.node_name not in batch_information:
-            batch_information[selected_node.node_name] = []
-
-        batch_information[selected_node.node_name].append(next_batch)
+            node_image += [auth['username'], auth['password']]
+        node_image = tuple(node_image)
 
         # update batch data
         self._mongo.db['batches'].update_one(
@@ -641,13 +652,7 @@ class Scheduler:
             }
         )
 
-        complete_batch = {
-            'batchId': batch_id,
-            'experimentId': experiment_id,
-            'nodeName': selected_node.node_name
-        }
-
-        return complete_batch
+        return selected_node.node_name, node_image
 
     def _get_experiment_of_batch(self, experiment_id, batch_id):
         """
