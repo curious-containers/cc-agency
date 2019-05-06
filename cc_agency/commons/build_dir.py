@@ -1,7 +1,7 @@
 import os
 import shutil
 
-import cc_core.agent.blue.main
+import cc_core.agent.blue.__main__
 
 from cc_agency.commons.helper import calculate_agency_id
 
@@ -17,7 +17,7 @@ def init_build_dir(conf):
         shutil.rmtree(build_dir)
     os.makedirs(build_dir)
 
-    shutil.copy(cc_core.agent.blue.main.__file__, os.path.join(build_dir, 'blue_agent.py'))
+    shutil.copy(cc_core.agent.blue.__main__.__file__, os.path.join(build_dir, 'blue_agent.py'))
 
     content = [
         'FROM docker.io/debian:9.5-slim',

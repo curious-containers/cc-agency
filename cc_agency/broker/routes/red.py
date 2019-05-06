@@ -1,14 +1,13 @@
 import jsonschema
 from time import time
 
-from cc_faice.commons.templates import get_secret_values
 from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
 from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
-from cc_core.commons.templates import get_template_keys
+from cc_core.commons.templates import get_template_keys, get_secret_values
 from cc_core.commons.exceptions import exception_format
 
 from cc_agency.commons.helper import str_to_bool
