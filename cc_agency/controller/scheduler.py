@@ -8,14 +8,13 @@ import requests
 from bson.objectid import ObjectId
 
 from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
-from cc_core.commons.red import red_get_mount_connectors_from_inputs, red_get_mount_connectors_from_outputs
+from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
 from cc_agency.controller.docker import ClientProxy
 from cc_agency.commons.helper import calculate_agency_id, batch_failure
 from cc_agency.commons.build_dir import init_build_dir
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
 from cc_agency.commons.secrets import get_batch_secret_keys
-
 
 _CRON_INTERVAL = 60
 
@@ -24,10 +23,12 @@ class CompleteNode:
     """
     Represents a processing node inside a cluster.
     """
-    def __init__(self, node_name, ram, gpus, ram_available, gpus_available, num_batches_running):
+
+    def __init__(self, node_name, online, ram, gpus, ram_available, gpus_available, num_batches_running):
         """
         Initialises a new CompleteNode.
         :param node_name: The name of the node given by the agency config.
+        :param online: Whether the given node is online or not.
         :param ram: The amount of ram of this node.
         :param gpus: The GPUs that are present on this node. Does include gpus, which are used by batches.
         :param ram_available: The ram that is available. Given by the amount of ram of the node minus the amount of ram
@@ -36,6 +37,7 @@ class CompleteNode:
         :param num_batches_running: The number of batches currently running on the node.
         """
         self.node_name = node_name
+        self.online = online
         self.ram = ram
         self.gpus = gpus
         self.ram_available = ram_available
@@ -297,7 +299,7 @@ class Scheduler:
         """
         cursor = self._mongo.db['nodes'].find(
             {},
-            {'online': 1, 'ram': 1, 'nodeName': 1}
+            {'state': 1, 'ram': 1, 'nodeName': 1}
         )
 
         nodes = list(cursor)
@@ -333,8 +335,11 @@ class Scheduler:
 
             available_gpus = self._get_available_gpus(node, batches)
 
+            online = node['state'] == 'online'
+
             complete_node = CompleteNode(
                 node_name=node_name,
+                online=online,
                 ram=node['ram'],
                 gpus=self._get_present_gpus(node['nodeName']),
                 ram_available=node['ram'] - used_ram,
@@ -355,6 +360,9 @@ class Scheduler:
         :param experiment: A dictionary containing hardware requirements for the experiment
         :return: True, if the nodes hardware is sufficient for the experiment, otherwise False
         """
+
+        if not node.online:
+            return False
 
         if node.ram_available < experiment['container']['settings']['ram']:
             return False
@@ -379,6 +387,8 @@ class Scheduler:
         :param experiment: The experiment for which the node is sufficient or not.
         :return: True, if the node is possibly sufficient otherwise False
         """
+        if not node.online:
+            return False
         if node.ram < experiment['container']['settings']['ram']:
             return False
         try:
@@ -392,6 +402,7 @@ class Scheduler:
         """
         Returns True if a possibly sufficient node is found otherwise False
         :param nodes: The nodes to check
+        :type nodes: List[CompleteNode]
         :param experiment: The description of the experiment
         :return: True if a possibly sufficient node is found otherwise False
         """
@@ -407,6 +418,7 @@ class Scheduler:
         :param nodes: The nodes, that are available for this experiment.
         :param experiment: The description of the experiment
         :return: The node that fits best for the given experiment. If no node fits at the moment None is returned.
+        :rtype: CompleteNode
         """
         # check sufficient nodes
         sufficient_nodes = [node for node in nodes if Scheduler._node_sufficient(node, experiment)]
@@ -453,169 +465,28 @@ class Scheduler:
         scheduled_batches = []
         image_information = {}
         batch_information = {}
-        nodes = self._get_cluster_state()
-        timestamp = time()
+        cluster_nodes = self._get_cluster_state()
 
-        experiments = {}
+        experiment_cache = {}
 
         # select batch to be scheduled
-        for batch in self._fifo():
-            batch_id = str(batch['_id'])
-            experiment_id = batch['experimentId']
-
-            experiment = experiments.get(experiment_id)
-
-            if not experiment:
-                experiment = self._mongo.db['experiments'].find_one(
-                    {'_id': ObjectId(experiment_id)},
-                    {'container.settings': 1, 'execution.settings': 1}
-                )
-                experiments[experiment_id] = experiment
-
-            experiment_secret_keys = get_experiment_secret_keys(experiment)
-            response = self._trustee_client.collect(experiment_secret_keys)
-            if response['state'] == 'failed':
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    response['debug_info'],
-                    None,
-                    self._conf,
-                    disable_retry_if_failed=True
-                )
-
-                if response.get('inspect'):
-                    response = self._trustee_client.inspect()
-                    if response['state'] == 'failed':
-                        debug_info = response['debug_info']
-                        print('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
-                        break
-
-                continue
-
-            experiment_secrets = response['secrets']
-            experiment = fill_experiment_secrets(experiment, experiment_secrets)
-
-            ram = experiment['container']['settings']['ram']
-
-            # limit the number of currently executed batches from a single experiment
-            concurrency_limit = experiment.get('execution', {}).get('settings', {}).get('batchConcurrencyLimit', 64)
-            batch_count = self._mongo.db['batches'].count({
-                'experimentId': experiment_id,
-                'state': {'$in': ['scheduled', 'processing']}
-            })
-            
-            if batch_count >= concurrency_limit:
-                continue
-
-            # check impossible experiments
-            if not Scheduler._check_nodes_possible_sufficient(nodes, experiment):
-                debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"'\
-                    .format(batch['experimentId'])
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    debug_info,
-                    None,
-                    self._conf,
-                    disable_retry_if_failed=True
-                )
-                continue
-
-            # select node
-            selected_node = Scheduler._get_best_node(nodes, experiment)
-
-            if selected_node is None:
-                continue
-
-            # calculate ram / gpus
-            selected_node.ram_available -= ram
-
-            used_gpu_ids = None
-            if selected_node.gpus_available:
-                gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
-                available_gpus = selected_node.gpus_available
-                used_gpus = match_gpus(available_gpus, requirements=gpu_requirements)
-
-                used_gpu_ids = []
-                for gpu in used_gpus:
-                    used_gpu_ids.append(gpu.device_id)
-                    available_gpus.remove(gpu)
-
-            # check mounting
-            mount_connectors = red_get_mount_connectors_from_inputs(batch['inputs'])
-            batch_outputs = batch.get('outputs')
-            if batch_outputs:
-                mount_connectors.extend(red_get_mount_connectors_from_outputs(batch_outputs))
-
-            is_mounting = bool(mount_connectors)
-
-            allow_insecure_capabilities = self._conf.d['controller']['docker'].get('allow_insecure_capabilities', False)
-
-            if not allow_insecure_capabilities and is_mounting:
-                # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
-                debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
-                             'configured to mount inside a docker container.{}{}'.format(os.linesep, mount_connectors)
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    debug_info,
-                    None,
-                    self._conf,
-                    disable_retry_if_failed=True
-                )
-                continue
-
-            image_data = [experiment['container']['settings']['image']['url']]
-            auth = experiment['container']['settings']['image'].get('auth')
-            if auth:
-                image_data += [auth['username'], auth['password']]
-            image_data = tuple(image_data)
-
-            if selected_node.node_name not in image_information:
-                image_information[selected_node.node_name] = {}
-
-            if image_data not in image_information[selected_node.node_name]:
-                image_information[selected_node.node_name][image_data] = []
-
-            image_information[selected_node.node_name][image_data].append(batch_id)
-
-            # schedule batch on selected node
-            if selected_node.node_name not in batch_information:
-                batch_information[selected_node.node_name] = []
-
-            batch_information[selected_node.node_name].append(batch)
-
-            # update batch data
-            self._mongo.db['batches'].update_one(
-                {'_id': batch['_id']},
-                {
-                    '$set': {
-                        'state': 'scheduled',
-                        'node': selected_node.node_name,
-                        'usedGPUs': used_gpu_ids,
-                        'mount': is_mounting
-                    },
-                    '$push': {
-                        'history': {
-                            'state': 'scheduled',
-                            'time': timestamp,
-                            'debugInfo': None,
-                            'node': selected_node.node_name,
-                            'ccagent': None
-                        }
-                    },
-                    '$inc': {
-                        'attempts': 1
-                    }
-                }
-            )
+        for next_batch in self._fifo():
+            scheduled_batch = self._schedule_batch(next_batch,
+                                                   cluster_nodes,
+                                                   experiment_cache,
+                                                   image_information,
+                                                   batch_information)
+            if scheduled_batch is not None:
+                cluster_nodes = self._get_cluster_state()
+                scheduled_batches.append(scheduled_batch)
 
         # inform node ClientProxies
-        for node in nodes:
-            node_name = node.node_name
+        for cluster_node in cluster_nodes:
+            node_name = cluster_node.node_name
             client_proxy = self._nodes[node_name]
-            client_proxy.put_action({'action': 'clean_up'})
+
+            if not client_proxy.put_action({'action': 'clean_up'}):
+                continue
 
             if node_name in image_information:
                 for image, required_by in image_information[node_name].items():
@@ -631,18 +502,200 @@ class Scheduler:
                             'password': image[2]
                         }
 
-                    client_proxy.put_action(data)
+                    if not client_proxy.put_action(data):
+                        continue
 
             if node_name in batch_information:
-                for batch in batch_information[node_name]:
-                    batch_id = str(batch['_id'])
+                for next_batch in batch_information[node_name]:
+                    batch_id = str(next_batch['_id'])
 
                     data = {
                         'action': 'run_batch_container',
                         'batch_id': batch_id
                     }
 
-                    client_proxy.put_action(data)
+                    if not client_proxy.put_action(data):
+                        continue
+
+    def _schedule_batch(self, next_batch, nodes, experiment_cache, image_information, batch_information):
+        """
+        Tries to find a node that is capable of processing the given batch. If no capable node could be found, None is
+        returned.
+        Updates the state of the batches in the db.
+
+        :param next_batch: The batch to schedule.
+        :param nodes: The nodes on which the batch should be scheduled.
+        :param experiment_cache: A dictionary mapping experiment ids to actual experiments to cache secret values of
+        experiments.
+        :return: The batch also containing information about the experiment.
+        :raise TrusteeServiceError: If the trustee service is unavailable.
+        """
+        batch_id = str(next_batch['_id'])
+        experiment_id = next_batch['experimentId']
+
+        experiment = experiment_cache.get(experiment_id)
+        if experiment is None:
+            experiment = self._get_experiment_of_batch(experiment_id, batch_id)
+
+        ram = experiment['container']['settings']['ram']
+
+        # limit the number of currently executed batches from a single experiment
+        concurrency_limit = experiment.get('execution', {}).get('settings', {}).get('batchConcurrencyLimit', 64)
+        batch_count = self._mongo.db['batches'].count({
+            'experimentId': experiment_id,
+            'state': {'$in': ['scheduled', 'processing']}
+        })
+
+        if batch_count >= concurrency_limit:
+            return None
+
+        # check impossible experiments
+        if not Scheduler._check_nodes_possible_sufficient(nodes, experiment):
+            debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"' \
+                .format(next_batch['experimentId'])
+            batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=True)
+            return None
+
+        # select node
+        selected_node = Scheduler._get_best_node(nodes, experiment)
+
+        if selected_node is None:
+            return None
+
+        # calculate ram / gpus
+        selected_node.ram_available -= ram
+
+        used_gpu_ids = None
+        if selected_node.gpus_available:
+            gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
+            available_gpus = selected_node.gpus_available
+            used_gpus = match_gpus(available_gpus, requirements=gpu_requirements)
+
+            used_gpu_ids = []
+            for gpu in used_gpus:
+                used_gpu_ids.append(gpu.device_id)
+                available_gpus.remove(gpu)
+
+        # check mounting
+        mount_connectors = red_get_mount_connectors_from_inputs(next_batch['inputs'])
+        is_mounting = bool(mount_connectors)
+
+        allow_insecure_capabilities = self._conf.d['controller']['docker'].get('allow_insecure_capabilities', False)
+
+        if not allow_insecure_capabilities and is_mounting:
+            # set state to failed, because insecure_capabilities are not allowed but needed, by this batch.
+            debug_info = 'FUSE support for this agency is disabled, but the following input/output-keys are ' \
+                         'configured to mount inside a docker container.{}{}'.format(os.linesep, mount_connectors)
+            batch_failure(
+                self._mongo,
+                batch_id,
+                debug_info,
+                None,
+                self._conf,
+                disable_retry_if_failed=True
+            )
+            return None
+
+        image_data = [experiment['container']['settings']['image']['url']]
+        auth = experiment['container']['settings']['image'].get('auth')
+        if auth:
+            image_data += [auth['username'], auth['password']]
+        image_data = tuple(image_data)
+
+        if selected_node.node_name not in image_information:
+            image_information[selected_node.node_name] = {}
+
+        if image_data not in image_information[selected_node.node_name]:
+            image_information[selected_node.node_name][image_data] = []
+
+        image_information[selected_node.node_name][image_data].append(batch_id)
+
+        # schedule batch on selected node
+        if selected_node.node_name not in batch_information:
+            batch_information[selected_node.node_name] = []
+
+        batch_information[selected_node.node_name].append(next_batch)
+
+        # update batch data
+        self._mongo.db['batches'].update_one(
+            {'_id': next_batch['_id']},
+            {
+                '$set': {
+                    'state': 'scheduled',
+                    'node': selected_node.node_name,
+                    'usedGPUs': used_gpu_ids,
+                    'mount': is_mounting
+                },
+                '$push': {
+                    'history': {
+                        'state': 'scheduled',
+                        'time': time(),
+                        'debugInfo': None,
+                        'node': selected_node.node_name,
+                        'ccagent': None
+                    }
+                },
+                '$inc': {
+                    'attempts': 1
+                }
+            }
+        )
+
+        complete_batch = {
+            'batchId': batch_id,
+            'experimentId': experiment_id,
+            'nodeName': selected_node.node_name
+        }
+
+        return complete_batch
+
+    def _get_experiment_of_batch(self, experiment_id, batch_id):
+        """
+        Returns the experiment of the given experiment_id with filled secrets.
+        :param experiment_id: The experiment id to resolve.
+        :param batch_id: The id of the corresponding batch.
+        :return: The experiment as dictionary with filled template values.
+        """
+        experiment = self._mongo.db['experiments'].find_one(
+            {'_id': ObjectId(experiment_id)},
+            {'container.settings': 1, 'execution.settings': 1}
+        )
+
+        experiment = self._fill_experiment_secret_keys(experiment, batch_id)
+
+        return experiment
+
+    def _fill_experiment_secret_keys(self, experiment, batch_id):
+        """
+        Returns the given experiment with filled template keys and values.
+        :param experiment: The experiment to complete.
+        :param batch_id: T
+        :return: Returns the given experiment with filled template keys and values. If not all secret values could be
+        filled None is returned.
+        :raise TrusteeServiceError: If the trustee service is unavailable.
+        """
+        experiment_secret_keys = get_experiment_secret_keys(experiment)
+        response = self._trustee_client.collect(experiment_secret_keys)
+        if response['state'] == 'failed':
+            batch_failure(
+                self._mongo,
+                batch_id,
+                response['debug_info'],
+                None,
+                self._conf,
+                disable_retry_if_failed=True
+            )
+
+            if response.get('inspect'):
+                response = self._trustee_client.inspect()
+                if response['state'] == 'failed':
+                    debug_info = response['debug_info']
+                    raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
+
+            return None
+
+        experiment_secrets = response['secrets']
+        return fill_experiment_secrets(experiment, experiment_secrets)
 
     def _fifo(self):
         cursor = self._mongo.db['batches'].aggregate([
@@ -655,4 +708,8 @@ class Scheduler:
 
 
 class InsufficientNodesException(Exception):
+    pass
+
+
+class TrusteeServiceError(Exception):
     pass

@@ -239,7 +239,20 @@ class ClientProxy:
         )
 
     def put_action(self, data):
-        self._action_q.put(data)
+        """
+        Adds the action data into the action_q. Returns if this operation was successful or not.
+
+        :param data: The action data to process
+        :return: True, if the action could be put into the action_queue, otherwise False
+        """
+        if self._action_q is None:
+            return False
+
+        try:
+            self._action_q.put(data)
+        except AttributeError:
+            return False
+        return True
 
     def _action_loop(self):
         while True:
