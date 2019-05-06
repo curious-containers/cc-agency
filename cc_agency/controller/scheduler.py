@@ -388,8 +388,11 @@ class Scheduler:
         """
         if node.ram < experiment['container']['settings']['ram']:
             return False
+        
+        gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
+
         try:
-            match_gpus(node.gpus, experiment['container']['settings'].get('gpus'))
+            match_gpus(node.gpus, gpu_requirements)
         except InsufficientGPUError:
             return False
         return True
