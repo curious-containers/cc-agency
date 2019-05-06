@@ -1,14 +1,14 @@
 import jsonschema
-from traceback import format_exc
 from time import time
 
+from cc_faice.commons.templates import get_secret_values
 from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
 from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
-from cc_core.commons.templates import inspect_templates_and_secrets
+from cc_core.commons.templates import get_template_keys
 from cc_core.commons.exceptions import exception_format
 
 from cc_agency.commons.helper import str_to_bool
@@ -97,10 +97,14 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             raise BadRequest('Given RED data does not comply with jsonschema. '
                              'Consider using the FAICE commandline tools for local validation.')
 
-        try:
-            _, secret_values, _ = inspect_templates_and_secrets(data, None, True)
-        except Exception:
-            raise BadRequest(format_exc())
+        template_keys = set()
+        get_template_keys(data, template_keys)
+        if template_keys:
+            raise BadRequest(
+                'The given red data contains the following variables: "{}". Please resolve them before submitting'
+                ' to agency. Consider using CC-FAICE (faice exec).'.format(', '.join(template_keys)))
+
+        secret_values = get_secret_values(data)
 
         if 'batches' in data:
             for batch in data['batches']:
@@ -121,7 +125,9 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             raise BadRequest('CC-Agency requires \'ram\' to be defined in the container settings.')
 
         if (data['container']['engine'] == 'nvidia-docker') and ('gpus' not in data['container']['settings']):
-            raise BadRequest('CC-Agency with \'nvidia-docker\' engine requires \'gpus\' to be defined in the container settings.')
+            raise BadRequest(
+                'CC-Agency with \'nvidia-docker\' engine requires \'gpus\' to be defined in the container settings.'
+            )
 
         try:
             engine_validation(data, 'execution', ['ccagency'], optional=True)
