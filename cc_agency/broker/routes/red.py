@@ -7,8 +7,9 @@ from bson.objectid import ObjectId
 
 from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
-from cc_core.commons.templates import get_template_keys, get_secret_values
+from cc_core.commons.templates import get_template_keys, get_secret_values, normalize_keys
 from cc_core.commons.exceptions import exception_format
+from cc_core.commons.red_to_blue import convert_red_to_blue
 
 from cc_agency.commons.helper import str_to_bool
 from cc_agency.commons.secrets import separate_secrets_batch, separate_secrets_experiment
@@ -130,6 +131,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         try:
             engine_validation(data, 'execution', ['ccagency'], optional=True)
+            normalize_keys(data)
+            _ = convert_red_to_blue(data)
         except Exception:
             raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 

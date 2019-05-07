@@ -5,11 +5,12 @@ from flask import request, jsonify
 from werkzeug.exceptions import Unauthorized, NotFound, BadRequest
 from bson.objectid import ObjectId
 
+from cc_core.commons.red_to_blue import convert_red_to_blue
+
 from cc_agency.commons.schemas.callback import callback_schema
 from cc_agency.commons.helper import batch_failure
 from cc_agency.commons.secrets import get_batch_secret_keys
 from cc_agency.commons.secrets import fill_batch_secrets
-from cc_core.commons.red_to_blue import convert_red_to_blue
 
 
 def callback_routes(app, mongo, auth, conf, controller, trustee_client):
@@ -42,14 +43,14 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
             {'_id': ObjectId(experiment_id)}
         )
 
-        result = {
+        red_data = {
             'redVersion': experiment['redVersion'],
             'cli': experiment['cli'],
             'inputs': batch['inputs'],
             'outputs': batch['outputs']
         }
 
-        blue_batches = convert_red_to_blue(result)
+        blue_batches = convert_red_to_blue(red_data)
 
         return jsonify(blue_batches[0])
 
