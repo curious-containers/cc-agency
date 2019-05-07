@@ -11,13 +11,13 @@ description = "CC-Agency is part of the Curious Containers project. It connects 
 [tool.poetry.dependencies]
 python = "^3.5"
 flask = "^1.0"
-jsonschema = "^2.6"
 docker = "^3.4"
 pyzmq = "^17.0"
 "ruamel.yaml" = "^0.15"
 pymongo = "^3.7"
 cryptography = "^2.2"
 requests = "^2.18"
+jsonschema = "^3.0"
 
 [tool.poetry.dev-dependencies]
 
