@@ -712,9 +712,5 @@ class Scheduler:
             yield b
 
 
-class InsufficientNodesException(Exception):
-    pass
-
-
 class TrusteeServiceError(Exception):
     pass
