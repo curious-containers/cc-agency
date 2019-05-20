@@ -15,7 +15,7 @@ from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure,
 from cc_agency.commons.build_dir import build_dir_path
 
 
-CURL_IMAGE = 'buildpack-deps:bionic-curl'
+CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
 
 
 class ClientProxy:
@@ -60,7 +60,7 @@ class ClientProxy:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
             self._fail_batches_without_assigned_container()  # in case of agency restart
-        except Exception as e:
+        except Exception:
             self._set_offline(format_exc())
             return
 
@@ -295,7 +295,7 @@ class ClientProxy:
                     if self._blue_agent_volume is None:
                         self._init_blue_agent(self._build_dir)
                     self._inspect()
-                except Exception as e:
+                except Exception:
                     self._blue_agent_volume = None
                     self._set_offline(format_exc())
                     self._action_q = None
@@ -340,7 +340,7 @@ class ClientProxy:
             {'experimentId': 1, 'usedGPUs': 1, 'mount': 1}
         )
         if not batch:
-            return
+            raise Exception('Cannot run batch container, because scheduled batch has not been found in database.')
 
         experiment_id = batch['experimentId']
         experiment = self._mongo.db['experiments'].find_one(
