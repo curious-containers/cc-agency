@@ -560,7 +560,17 @@ class Scheduler:
 
         experiment = experiment_cache.get(experiment_id)
         if experiment is None:
-            experiment = self._get_experiment_of_batch(experiment_id, batch_id)
+            try:
+                experiment = self._get_experiment_of_batch(experiment_id)
+            except Exception as e:
+                batch_failure(
+                    self._mongo,
+                    batch_id,
+                    repr(e),
+                    None,
+                    self._conf,
+                    disable_retry_if_failed=True
+                )
 
         ram = experiment['container']['settings']['ram']
 
@@ -654,11 +664,10 @@ class Scheduler:
 
         return selected_node.node_name, node_image
 
-    def _get_experiment_of_batch(self, experiment_id, batch_id):
+    def _get_experiment_of_batch(self, experiment_id):
         """
         Returns the experiment of the given experiment_id with filled secrets.
         :param experiment_id: The experiment id to resolve.
-        :param batch_id: The id of the corresponding batch.
         :return: The experiment as dictionary with filled template values.
         """
         experiment = self._mongo.db['experiments'].find_one(
@@ -666,30 +675,23 @@ class Scheduler:
             {'container.settings': 1, 'execution.settings': 1}
         )
 
-        experiment = self._fill_experiment_secret_keys(experiment, batch_id)
+        experiment = self._fill_experiment_secret_keys(experiment)
 
         return experiment
 
-    def _fill_experiment_secret_keys(self, experiment, batch_id):
+    def _fill_experiment_secret_keys(self, experiment):
         """
         Returns the given experiment with filled template keys and values.
         :param experiment: The experiment to complete.
-        :param batch_id: T
-        :return: Returns the given experiment with filled template keys and values. If not all secret values could be
-        filled None is returned.
-        :raise TrusteeServiceError: If the trustee service is unavailable.
+        :return: Returns the given experiment with filled template keys and values.
+        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+        requested keys
         """
         experiment_secret_keys = get_experiment_secret_keys(experiment)
         response = self._trustee_client.collect(experiment_secret_keys)
         if response['state'] == 'failed':
-            batch_failure(
-                self._mongo,
-                batch_id,
-                response['debug_info'],
-                None,
-                self._conf,
-                disable_retry_if_failed=True
-            )
+
+            debug_info = response['debugInfo']
 
             if response.get('inspect'):
                 response = self._trustee_client.inspect()
@@ -697,7 +699,10 @@ class Scheduler:
                     debug_info = response['debug_info']
                     raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
 
-            return None
+            experiment_id = str(experiment['_id'])
+            raise TrusteeServiceError(
+                'Trustee service request failed for experiment "{}":{}{}'.format(experiment_id, os.linesep, debug_info)
+            )
 
         experiment_secrets = response['secrets']
         return fill_experiment_secrets(experiment, experiment_secrets)
