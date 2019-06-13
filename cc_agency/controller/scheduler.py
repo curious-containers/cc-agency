@@ -465,15 +465,12 @@ class Scheduler:
         image_information = {}
         cluster_nodes = self._get_cluster_state()
 
-        experiment_cache = {}
-
         # select batch to be scheduled
         for next_batch in self._fifo():
             batch_id = str(next_batch['_id'])
             node_name, node_image = self._schedule_batch(
                 next_batch,
-                cluster_nodes,
-                experiment_cache,
+                cluster_nodes
             )
             if node_name is not None:
                 cluster_nodes = self._get_cluster_state()
@@ -538,7 +535,7 @@ class Scheduler:
                                 self._conf
                             )
 
-    def _schedule_batch(self, next_batch, nodes, experiment_cache):
+    def _schedule_batch(self, next_batch, nodes):
         """
         Tries to find a node that is capable of processing the given batch. If no capable node could be found, None is
         returned.
@@ -546,8 +543,6 @@ class Scheduler:
 
         :param next_batch: The batch to schedule.
         :param nodes: The nodes on which the batch should be scheduled.
-        :param experiment_cache: A dictionary mapping experiment ids to actual experiments to cache secret values of
-        experiments.
         :return: A tuple containing node_name, node_image
         node_name: string representing the node
         node_image: Tuple (docker_image_url, username, password) where username, password is optional.
@@ -558,19 +553,18 @@ class Scheduler:
         batch_id = str(next_batch['_id'])
         experiment_id = next_batch['experimentId']
 
-        experiment = experiment_cache.get(experiment_id)
-        if experiment is None:
-            try:
-                experiment = self._get_experiment_of_batch(experiment_id)
-            except Exception as e:
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    repr(e),
-                    None,
-                    self._conf,
-                    disable_retry_if_failed=True
-                )
+        try:
+            experiment = self._get_experiment_of_batch(experiment_id)
+        except Exception as e:
+            batch_failure(
+                self._mongo,
+                batch_id,
+                repr(e),
+                None,
+                self._conf,
+                disable_retry_if_failed=True
+            )
+            return None, None
 
         ram = experiment['container']['settings']['ram']
 
