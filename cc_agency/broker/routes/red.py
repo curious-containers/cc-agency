@@ -53,11 +53,12 @@ def _prepare_red_data(data, user):
 
     batches = []
 
-    for rb in raw_batches:
+    for i, rb in enumerate(raw_batches):
         batch = {
             'username': user['username'],
             'registrationTime': timestamp,
             'state': 'registered',
+            'batchesListIndex': i,
             'protectedKeysVoided': False,
             'notificationsSent': False,
             'node': None,
@@ -338,7 +339,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             'registrationTime': 1,
             'state': 1,
             'experimentId': 1,
-            'node': 1
+            'node': 1,
+            'batchesListIndex': 1
         }})
 
         aggregate.append({'$sort': {'registrationTime': 1 if ascending else -1}})
