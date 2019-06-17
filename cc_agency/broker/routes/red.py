@@ -176,7 +176,27 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         if not o:
             raise NotFound('Could not find Object.')
 
-        mongo.db['batches'].update_one(match_with_state, {'$set': {'state': 'cancelled'}})
+        result = mongo.db['batches'].update_one(
+            match_with_state,
+            {
+                '$set': {
+                    'state': 'cancelled'
+                },
+                '$push': {
+                    'history': {
+                        'state': 'cancelled',
+                        'time': time(),
+                        'debugInfo': None,
+                        'node': None,
+                        'ccagent': None
+                    }
+                }
+            })
+
+        if (result.matched_count != 1) or (result.modified_count != 1):
+            raise BadRequest(
+                'Could not cancel batch {}. Num batches matched: {}'.format(object_id, result.matched_count)
+            )
 
         o = mongo.db['batches'].find_one(match)
         o['_id'] = str(o['_id'])
