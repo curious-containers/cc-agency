@@ -106,7 +106,7 @@ class Auth:
     def verify_callback(self, batch_id, token):
         self._mongo.db['callback_tokens'].delete_many({'timestamp': {'$lt': time() - self._tokens_valid_for_seconds}})
         cursor = self._mongo.db['callback_tokens'].find(
-            {'batch_id': ObjectId(batch_id)},
+            {'batch_id': batch_id},
             {'token': 1, 'salt': 1}
         )
         for c in cursor:

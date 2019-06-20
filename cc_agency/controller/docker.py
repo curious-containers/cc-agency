@@ -435,7 +435,7 @@ class ClientProxy:
         :param experiment: The experiment of this batch
         :type experiment: dict
         """
-        batch_id = batch['_id']
+        batch_id = str(batch['_id'])
         runtime = engine_to_runtime(experiment['container']['engine'])
 
         # set nvidia gpu environment
@@ -489,7 +489,7 @@ class ClientProxy:
         }
 
         self._mongo.db['batches'].update_one(
-            {'_id': batch_id},
+            {'_id': ObjectId(batch_id)},
             {
                 '$set': {
                     'state': 'processing',
