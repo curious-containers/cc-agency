@@ -10,7 +10,7 @@ from bson.objectid import ObjectId
 from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
 from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
-from cc_agency.controller.docker import ClientProxy
+from cc_agency.controller.docker import ClientProxy, TrusteeServiceError
 from cc_agency.commons.helper import calculate_agency_id, batch_failure
 from cc_agency.commons.build_dir import init_build_dir
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
@@ -467,7 +467,7 @@ class Scheduler:
         # select batch to be scheduled
         for next_batch in self._fifo():
             node_name = self._schedule_batch(next_batch, cluster_nodes)
-            
+
             if node_name is not None:
                 cluster_nodes = self._get_cluster_state()
                 scheduled_nodes.append((next_batch['_id'], node_name))
@@ -668,8 +668,4 @@ class Scheduler:
 
 
 class InsufficientNodesException(Exception):
-    pass
-
-
-class TrusteeServiceError(Exception):
     pass

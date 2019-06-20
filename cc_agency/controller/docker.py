@@ -9,7 +9,6 @@ import docker
 from bson.objectid import ObjectId
 
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
-from cc_agency.controller.scheduler import TrusteeServiceError
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
@@ -538,3 +537,7 @@ class ClientProxy:
 
     def _pull_image_failure(self, debug_info, batch_id):
         batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+
+
+class TrusteeServiceError(Exception):
+    pass
