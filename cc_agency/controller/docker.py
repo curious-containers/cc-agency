@@ -8,6 +8,8 @@ from uuid import uuid4
 import docker
 from bson.objectid import ObjectId
 
+from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
+from cc_agency.controller.scheduler import TrusteeServiceError
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
@@ -19,10 +21,11 @@ CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
 
 
 class ClientProxy:
-    def __init__(self, node_name, conf, mongo):
+    def __init__(self, node_name, conf, mongo, trustee_client):
         self._node_name = node_name
         self._conf = conf
         self._mongo = mongo
+        self._trustee_client = trustee_client
 
         self._build_dir = build_dir_path(conf)
 
@@ -268,20 +271,11 @@ class ClientProxy:
             if action == 'inspect':
                 inspect = True
 
-            elif action == 'run_batch_container':
+            elif action == 'check_for_batches':
                 try:
-                    self._run_batch_container(batch_id=data['batch_id'])
+                    self._check_for_batches()
                 except Exception:
                     inspect = True
-                    self._run_batch_container_failure(data['batch_id'], format_exc())
-
-            elif action == 'pull_image':
-                try:
-                    self._pull_image(image=data['url'], auth=data.get('auth'))
-                except:
-                    inspect = True
-                    batch_ids = data['required_by']
-                    self._pull_image_failure(format_exc(), batch_ids)
 
             elif action == 'clean_up':
                 try:
@@ -334,23 +328,115 @@ class ClientProxy:
 
         self._blue_agent_volume = blue_agent_volume
 
-    def _run_batch_container(self, batch_id):
-        batch = self._mongo.db['batches'].find_one(
-            {'_id': ObjectId(batch_id), 'state': 'scheduled'},
-            {'experimentId': 1, 'usedGPUs': 1, 'mount': 1}
-        )
-        if not batch:
-            raise Exception('Cannot run batch container, because scheduled batch has not been found in database.')
+    def _check_for_batches(self):
+        """
+        Queries the database to find batches, which are in state 'scheduled' and are scheduled to the node of this
+        ClientProxy. If a batch with these conditions was found, the docker image for this batch is pulled and the batch
+        is started. The state of the batch is then updated to 'processing'.
+        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+        requested keys
+        """
 
-        experiment_id = batch['experimentId']
+        # query for batches, that are in state 'scheduled' and are scheduled to this node
+        query = {
+            'state': 'scheduled',
+            'node': self._node_name
+        }
+
+        for batch in self._mongo.db['batches'].find(query):
+            # get batch_id and experiment
+            batch_id = batch['_id']
+            experiment = self._get_experiment_with_secrets(batch['experimentId'])
+
+            # pull image
+            try:
+                self._pull_image_for_experiment(experiment)
+            except:
+                self._pull_image_failure(format_exc(), batch_id)
+                continue
+
+            # run container
+            try:
+                self._run_batch_container(batch, experiment)
+            except:
+                self._run_batch_container_failure(batch_id, format_exc())
+
+    def _get_experiment_with_secrets(self, experiment_id):
+        """
+        Returns the experiment of the given experiment_id with filled secrets.
+        :param experiment_id: The experiment id to resolve.
+        :return: The experiment as dictionary with filled template values.
+        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+        requested keys
+        """
         experiment = self._mongo.db['experiments'].find_one(
             {'_id': ObjectId(experiment_id)},
-            {
-                'container.engine': 1,
-                'container.settings.image.url': 1,
-                'container.settings.ram': 1
-            }
+            {'container.settings': 1, 'execution.settings': 1}
         )
+
+        experiment = self._fill_experiment_secret_keys(experiment)
+
+        return experiment
+
+    def _fill_experiment_secret_keys(self, experiment):
+        """
+        Returns the given experiment with filled template keys and values.
+        :param experiment: The experiment to complete.
+        :return: Returns the given experiment with filled template keys and values.
+        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+        requested keys
+        """
+        experiment_secret_keys = get_experiment_secret_keys(experiment)
+        response = self._trustee_client.collect(experiment_secret_keys)
+        if response['state'] == 'failed':
+
+            debug_info = response['debugInfo']
+
+            if response.get('inspect'):
+                response = self._trustee_client.inspect()
+                if response['state'] == 'failed':
+                    debug_info = response['debug_info']
+                    raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
+
+            experiment_id = str(experiment['_id'])
+            raise TrusteeServiceError(
+                'Trustee service request failed for experiment "{}":{}{}'.format(experiment_id, os.linesep, debug_info)
+            )
+
+        experiment_secrets = response['secrets']
+        return fill_experiment_secrets(experiment, experiment_secrets)
+
+    def _pull_image_for_experiment(self, experiment):
+        """
+        Reads the needed docker image for the given batch and pulls it on the node of this ClientProxy.
+        :param experiment: An experiment with filled secret keys, whose image should be pulled
+        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+        requested keys
+        :raise Exception: If the given image authentication information is not complete (username and password are
+        mandatory)
+        """
+
+        image_url = experiment['container']['settings']['image']['url']
+
+        image_auth = experiment['container']['settings']['image'].get('auth')
+        if image_auth:
+            for mandatory_key in ('username', 'password'):
+                if mandatory_key not in image_auth:
+                    raise Exception('Image authentication is given, but "{}" is missing'.format(mandatory_key))
+
+        self._pull_image(image_url, image_auth)
+
+    def _run_batch_container(self, batch, experiment):
+        """
+        Runs the given batch, with settings described in the given batch and experiment.
+        Sets the state of the given batch to 'processing'.
+
+        :param batch: The batch to run
+        :type batch: dict
+        :param experiment: The experiment of this batch
+        :type experiment: dict
+        """
+        batch_id = batch['_id']
         runtime = engine_to_runtime(experiment['container']['engine'])
 
         # set nvidia gpu environment
@@ -404,7 +490,7 @@ class ClientProxy:
         }
 
         self._mongo.db['batches'].update_one(
-            {'_id': batch['_id']},
+            {'_id': batch_id},
             {
                 '$set': {
                     'state': 'processing',
@@ -450,6 +536,5 @@ class ClientProxy:
     def _pull_image(self, image, auth):
         self._client.images.pull(image, auth_config=auth)
 
-    def _pull_image_failure(self, debug_info, batch_ids):
-        for batch_id in batch_ids:
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+    def _pull_image_failure(self, debug_info, batch_id):
+        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
