@@ -370,7 +370,6 @@ class ClientProxy:
         """
         experiment = self._mongo.db['experiments'].find_one(
             {'_id': ObjectId(experiment_id)},
-            {'container.settings': 1, 'execution.settings': 1}
         )
 
         experiment = self._fill_experiment_secret_keys(experiment)
@@ -429,6 +428,7 @@ class ClientProxy:
         """
         Runs the given batch, with settings described in the given batch and experiment.
         Sets the state of the given batch to 'processing'.
+        Creates a callback token for the given batch
 
         :param batch: The batch to run
         :type batch: dict
