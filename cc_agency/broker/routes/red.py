@@ -177,7 +177,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         if not o:
             raise NotFound('Could not find Object.')
 
-        result = mongo.db['batches'].update_one(
+        mongo.db['batches'].update_one(
             match_with_state,
             {
                 '$set': {
