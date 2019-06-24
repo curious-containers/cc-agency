@@ -194,11 +194,6 @@ def red_routes(app, mongo, auth, controller, trustee_client):
                 }
             })
 
-        if (result.matched_count != 1) or (result.modified_count != 1):
-            raise BadRequest(
-                'Could not cancel batch {}. Num batches matched: {}'.format(object_id, result.matched_count)
-            )
-
         o = mongo.db['batches'].find_one(match)
         o['_id'] = str(o['_id'])
 
