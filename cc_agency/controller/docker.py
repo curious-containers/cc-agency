@@ -1,16 +1,19 @@
 import os
 from queue import Queue
 from threading import Thread
+import concurrent.futures
 from time import time
 from traceback import format_exc
 from typing import List, Tuple, Dict
 from uuid import uuid4
 
 import docker
+from docker.tls import TLSConfig
 from bson.objectid import ObjectId
 
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
 from cc_core.commons.engines import engine_to_runtime
+from cc_core.commons.exceptions import exception_format
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
@@ -18,6 +21,54 @@ from cc_agency.commons.build_dir import build_dir_path
 
 
 CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
+
+
+class ImagePullResult:
+    def __init__(self, image_url, auth, successful, debug_info, depending_batches):
+        """
+        Creates a new DockerImagePull object
+
+        :param image_url: The url of the image to pull
+        :type image_url: str
+        :param auth: The authentication data for this image. Can be None if no authentication is required, otherwise it
+                     has to be a tuple (username, password).
+        :type auth: None or Tuple[str, str]
+        :param successful: A boolean that is True, if the pull was successful
+        :type successful: bool
+        :param debug_info: A list of strings describing the error if the pull failed. Otherwise None.
+        :type debug_info: List[str] or None
+        :param depending_batches: A list of batches that depend on the execution of this docker pull
+        :type depending_batches: List[Dict]
+        """
+        self.image_url = image_url
+        self.auth = auth
+        self.successful = successful
+        self.debug_info = debug_info
+        self.depending_batches = depending_batches
+
+
+def _pull_image(docker_client, image_url, auth, depending_batches):
+    """
+    Pulls the given docker image and returns a ImagePullResult object.
+
+    :param docker_client: The docker client, which is used to pull the image
+    :type docker_client: docker.DockerClient
+    :param image_url: The image to pull
+    :type image_url: str
+    :param auth: A tuple containing (username, password) or None
+    :type auth: Tuple[str, str] or None
+    :param depending_batches: A list of batches, which depend on the given image
+    :type depending_batches: List[Dict]
+
+    :return: An ImagePullResult describing the pull
+    :rtype: ImagePullResult
+    """
+    try:
+        docker_client.images.pull(image_url, auth_config=auth)
+    except:
+        return ImagePullResult(image_url, auth, False, exception_format(), depending_batches)
+
+    return ImagePullResult(image_url, auth, True, None, depending_batches)
 
 
 class ClientProxy:
@@ -33,8 +84,7 @@ class ClientProxy:
         self._base_url = node_conf['base_url']
         self._tls = False
         if 'tls' in node_conf:
-            # noinspection PyUnresolvedReferences
-            self._tls = docker.tls.TLSConfig(**node_conf['tls'])
+            self._tls = TLSConfig(**node_conf['tls'])
 
         self._environment = node_conf.get('environment')
         self._network = node_conf.get('network')
@@ -72,6 +122,10 @@ class ClientProxy:
         Thread(target=self._action_loop).start()
         self._set_online(ram, cpus)
         self._action_q.put({'action': 'inspect'})
+
+        # initialize Executor Pools
+        self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
@@ -362,16 +416,22 @@ class ClientProxy:
             image_to_batches[image_authentication].append(batch)
 
         # pull images
-        for image_authentication, batch_list in image_to_batches.items():
-            try:
-                self._pull_image(image_authentication[0], image_authentication[1])
-            except:
-                # If pulling failed, the batches, which needed this image fail and are removed from the
-                # batches_with_experiments list
-                format_exc_result = format_exc()
-                for batch in batch_list:
+        pull_futures = []
+        for image_authentication, depending_batches in image_to_batches.items():
+            image_url, auth = image_authentication
+            future = self._pull_executor.submit(_pull_image, self._client, image_url, auth, depending_batches)
+            pull_futures.append(future)
+
+        for pull_future in pull_futures:
+            image_pull_result = pull_future.result()  # type: ImagePullResult
+
+            # If pulling failed, the batches, which needed this image fail and are removed from the
+            # batches_with_experiments list
+            if not image_pull_result.successful:
+                for batch in image_pull_result.depending_batches:
+                    # fail the batch
                     batch_id = str(batch['_id'])
-                    self._pull_image_failure(format_exc_result, batch_id)
+                    self._pull_image_failure(image_pull_result.debug_info, batch_id)
 
                     # remove batches that are failed
                     batches_with_experiments = list(filter(
@@ -380,12 +440,18 @@ class ClientProxy:
                     ))
 
         # run every batch, that has not failed
+        run_futures = []  # type: List[concurrent.futures.Future]
         for batch, experiment in batches_with_experiments:
-            try:
-                self._run_batch_container(batch, experiment)
-            except:
-                batch_id = str(batch['_id'])
-                self._run_batch_container_failure(batch_id, format_exc())
+            future = self._run_executor.submit(
+                ClientProxy._run_batch_container_and_handle_exceptions,
+                self._client,
+                batch,
+                experiment
+            )
+            run_futures.append(future)
+
+        # wait for all batches to run
+        concurrent.futures.wait(run_futures, return_when=concurrent.futures.ALL_COMPLETED)
 
     def _get_experiment_with_secrets(self, experiment_id):
         """
@@ -474,6 +540,22 @@ class ClientProxy:
             image_auth = None
 
         return image_url, image_auth
+
+    def _run_batch_container_and_handle_exceptions(self, batch, experiment):
+        """
+        Runs the given batch by calling _run_batch_container(), but handles exceptions, by calling
+        _run_batch_container_failure().
+        :param batch: The batch to run
+        :type batch: dict
+        :param experiment: The experiment of this batch
+        :type experiment: dict
+        :return:
+        """
+        try:
+            self._run_batch_container(batch, experiment)
+        except:
+            batch_id = str(batch['_id'])
+            self._run_batch_container_failure(batch_id, format_exc())
 
     def _run_batch_container(self, batch, experiment):
         """
@@ -582,9 +664,6 @@ class ClientProxy:
 
     def _run_batch_container_failure(self, batch_id, debug_info):
         batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
-
-    def _pull_image(self, image, auth):
-        self._client.images.pull(image, auth_config=auth)
 
     def _pull_image_failure(self, debug_info, batch_id):
         batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
