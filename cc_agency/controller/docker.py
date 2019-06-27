@@ -3,6 +3,7 @@ from queue import Queue
 from threading import Thread
 from time import time
 from traceback import format_exc
+from typing import List, Tuple, Dict
 from uuid import uuid4
 
 import docker
@@ -32,6 +33,7 @@ class ClientProxy:
         self._base_url = node_conf['base_url']
         self._tls = False
         if 'tls' in node_conf:
+            # noinspection PyUnresolvedReferences
             self._tls = docker.tls.TLSConfig(**node_conf['tls'])
 
         self._environment = node_conf.get('environment')
@@ -330,8 +332,10 @@ class ClientProxy:
     def _check_for_batches(self):
         """
         Queries the database to find batches, which are in state 'scheduled' and are scheduled to the node of this
-        ClientProxy. If a batch with these conditions was found, the docker image for this batch is pulled and the batch
-        is started. The state of the batch is then updated to 'processing'.
+        ClientProxy.
+        First all docker images are pulled, which are used to process these batches. Afterwards the batch processing is
+        run. The state in the database for these batches is then updated to 'processing'.
+
         :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
         requested keys
         """
@@ -342,28 +346,52 @@ class ClientProxy:
             'node': self._node_name
         }
 
+        # list containing batches that are scheduled to this node and save them together with their experiment
+        batches_with_experiments = []  # type: List[Tuple[Dict, Dict]]
+
+        # also create a dictionary, that maps docker image authentications to batches, which need this docker image
+        image_to_batches = {}  # type: Dict[Tuple, List[Dict]]
+
         for batch in self._mongo.db['batches'].find(query):
-            # get batch_id and experiment
-            batch_id = batch['_id']
             experiment = self._get_experiment_with_secrets(batch['experimentId'])
+            batches_with_experiments.append((batch, experiment))
 
-            # pull image
+            image_authentication = ClientProxy._get_image_authentication(experiment)
+            if image_authentication not in image_to_batches:
+                image_to_batches[image_authentication] = []
+            image_to_batches[image_authentication].append(batch)
+
+        # pull images
+        for image_authentication, batch_list in image_to_batches.items():
             try:
-                self._pull_image_for_experiment(experiment)
+                self._pull_image(image_authentication[0], image_authentication[1])
             except:
-                self._pull_image_failure(format_exc(), batch_id)
-                continue
+                # If pulling failed, the batches, which needed this image fail and are removed from the
+                # batches_with_experiments list
+                format_exc_result = format_exc()
+                for batch in batch_list:
+                    batch_id = str(batch['_id'])
+                    self._pull_image_failure(format_exc_result, batch_id)
 
-            # run container
+                    # remove batches that are failed
+                    batches_with_experiments = list(filter(
+                        lambda batch_with_experiment: str(batch_with_experiment[0]['_id']) != batch_id,
+                        batches_with_experiments
+                    ))
+
+        # run every batch, that has not failed
+        for batch, experiment in batches_with_experiments:
             try:
                 self._run_batch_container(batch, experiment)
             except:
+                batch_id = str(batch['_id'])
                 self._run_batch_container_failure(batch_id, format_exc())
 
     def _get_experiment_with_secrets(self, experiment_id):
         """
         Returns the experiment of the given experiment_id with filled secrets.
         :param experiment_id: The experiment id to resolve.
+        :type experiment_id: ObjectId
         :return: The experiment as dictionary with filled template values.
         :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
         requested keys
@@ -404,17 +432,36 @@ class ClientProxy:
         experiment_secrets = response['secrets']
         return fill_experiment_secrets(experiment, experiment_secrets)
 
-    def _pull_image_for_experiment(self, experiment):
+    @staticmethod
+    def _get_image_url(experiment):
         """
-        Reads the needed docker image for the given batch and pulls it on the node of this ClientProxy.
-        :param experiment: An experiment with filled secret keys, whose image should be pulled
-        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
-        requested keys
+        Gets the url of the docker image for the given experiment
+        :param experiment: The experiment whose docker image url is returned
+        :type experiment: Dict
+        :return: The url of the docker image for the given experiment
+        """
+        return experiment['container']['settings']['image']['url']
+
+    @staticmethod
+    def _get_image_authentication(experiment):
+        """
+        Reads the docker authentication information from the given experiment and returns it as tuple. The first element
+        is always the image_url for the docker image. The second element is a tuple containing the username and password
+        for authentication at the docker registry. If no username and password is given, the second return value is None
+
+        :param experiment: An experiment with filled secret keys, whose image authentication information should be
+        returned
+        :type experiment: Dict
+
+        :return: A tuple containing the image_url as first element. The second element can be None or a Tuple containing
+        (username, password) for authentication at the docker registry.
+        :rtype: Tuple[str, None] or Tuple[str, Tuple[str, str]]
+
         :raise Exception: If the given image authentication information is not complete (username and password are
         mandatory)
         """
 
-        image_url = experiment['container']['settings']['image']['url']
+        image_url = ClientProxy._get_image_url(experiment)
 
         image_auth = experiment['container']['settings']['image'].get('auth')
         if image_auth:
@@ -422,7 +469,11 @@ class ClientProxy:
                 if mandatory_key not in image_auth:
                     raise Exception('Image authentication is given, but "{}" is missing'.format(mandatory_key))
 
-        self._pull_image(image_url, image_auth)
+            image_auth = (image_auth['username'], image_auth['password'])
+        else:
+            image_auth = None
+
+        return image_url, image_auth
 
     def _run_batch_container(self, batch, experiment):
         """
