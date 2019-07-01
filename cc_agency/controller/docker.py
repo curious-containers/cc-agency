@@ -444,7 +444,7 @@ class ClientProxy:
         for batch, experiment in batches_with_experiments:
             future = self._run_executor.submit(
                 ClientProxy._run_batch_container_and_handle_exceptions,
-                self._client,
+                self,
                 batch,
                 experiment
             )
