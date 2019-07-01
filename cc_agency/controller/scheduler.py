@@ -238,24 +238,26 @@ class Scheduler:
                 sleep(_CRON_INTERVAL)
                 continue
 
-            # ClientProxies clean up
-            cluster_nodes = self._get_cluster_state()
-            for cluster_node in cluster_nodes:
-                node_name = cluster_node.node_name
-                client_proxy = self._nodes[node_name]
-
-                client_proxy.put_action({'action': 'clean_up'})
-
+            self._clean_up_client_proxies()
             self._schedule_batches()
+            self._client_proxies_check_for_batches()
 
-            self.client_proxies_check_for_batches()
+    def _clean_up_client_proxies(self):
+        """
+        Puts a 'clean_up' action in every ClientProxy
+        :return:
+        """
+        cluster_nodes = self._get_cluster_state()
+        for cluster_node in cluster_nodes:
+            node_name = cluster_node.node_name
+            client_proxy = self._nodes[node_name]
+            client_proxy.put_action({'action': 'clean_up'})
 
-    def client_proxies_check_for_batches(self):
+    def _client_proxies_check_for_batches(self):
         """
         Puts a 'check_for_batches' action in every ClientProxy. If this is not possible all batches, which are scheduled
         to this client proxy are set to failed or back to registered.
         """
-        # let ClientProxies check for batches
         for node_name, client_proxy in self._nodes.items():
             check_for_batches_data = {
                 'action': 'check_for_batches'
