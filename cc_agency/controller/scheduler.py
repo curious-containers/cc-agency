@@ -3,6 +3,7 @@ import sys
 from threading import Thread
 from queue import Queue, Full
 from time import time, sleep
+from typing import Dict
 
 import requests
 from bson.objectid import ObjectId
@@ -66,7 +67,7 @@ class Scheduler:
             node_name: ClientProxy(node_name, conf, mongo, trustee_client)
             for node_name
             in conf.d['controller']['docker']['nodes'].keys()
-        }
+        }  # type: Dict[str, ClientProxy]
 
         Thread(target=self._scheduling_loop).start()
         Thread(target=self._inspection_loop).start()
@@ -237,7 +238,46 @@ class Scheduler:
                 sleep(_CRON_INTERVAL)
                 continue
 
+            # ClientProxies clean up
+            cluster_nodes = self._get_cluster_state()
+            for cluster_node in cluster_nodes:
+                node_name = cluster_node.node_name
+                client_proxy = self._nodes[node_name]
+
+                client_proxy.put_action({'action': 'clean_up'})
+
             self._schedule_batches()
+
+            self.client_proxies_check_for_batches()
+
+    def client_proxies_check_for_batches(self):
+        """
+        Puts a 'check_for_batches' action in every ClientProxy. If this is not possible all batches, which are scheduled
+        to this client proxy are set to failed or back to registered.
+        """
+        # let ClientProxies check for batches
+        for node_name, client_proxy in self._nodes.items():
+            check_for_batches_data = {
+                'action': 'check_for_batches'
+            }
+
+            if not client_proxy.put_action(check_for_batches_data):
+                batches_of_node = self._mongo.db['batches'].find(
+                    {'node': node_name, 'state': 'scheduled'},
+                    {'_id': 1}
+                )
+                for batch_of_node in batches_of_node:
+                    batch_id = str(batch_of_node['_id'])
+                    debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
+                        node_name
+                    )
+                    batch_failure(
+                        self._mongo,
+                        batch_id,
+                        debug_info,
+                        None,
+                        self._conf
+                    )
 
     @staticmethod
     def _get_busy_gpu_ids(batches, node_name):
@@ -471,33 +511,6 @@ class Scheduler:
             if node_name is not None:
                 cluster_nodes = self._get_cluster_state()
                 scheduled_nodes.append((next_batch['_id'], node_name))
-
-        # ClientProxies clean up
-        for cluster_node in cluster_nodes:
-            node_name = cluster_node.node_name
-            client_proxy = self._nodes[node_name]
-
-            if not client_proxy.put_action({'action': 'clean_up'}):
-                continue
-
-        # inform ClientProxies about new batches
-        for batch_id, node_name in scheduled_nodes:
-            client_proxy = self._nodes[node_name]
-            check_for_batches_data = {
-                'action': 'check_for_batches'
-            }
-
-            if not client_proxy.put_action(check_for_batches_data):
-                debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
-                    node_name
-                )
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    debug_info,
-                    None,
-                    self._conf
-                )
 
     def _schedule_batch(self, next_batch, nodes):
         """

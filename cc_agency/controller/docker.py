@@ -129,6 +129,9 @@ class ClientProxy:
         self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
         self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
 
+    def is_online(self):
+        return bool(self._online)
+
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
 
@@ -221,7 +224,7 @@ class ClientProxy:
         cursor = self._mongo.db['batches'].find(
             {
                 'node': self._node_name,
-                'state': {'$in': ['scheduled', 'processing']}
+                'state': {'$in': ['processing']}
             },
             {'_id': 1}
         )
