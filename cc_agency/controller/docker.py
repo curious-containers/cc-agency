@@ -72,6 +72,8 @@ def _pull_image(docker_client, image_url, auth, depending_batches):
 
 
 class ClientProxy:
+    NUM_WORKERS = 4
+
     def __init__(self, node_name, conf, mongo, trustee_client):
         self._node_name = node_name
         self._conf = conf
@@ -124,8 +126,8 @@ class ClientProxy:
         self._action_q.put({'action': 'inspect'})
 
         # initialize Executor Pools
-        self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=4)
+        self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
+        self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
