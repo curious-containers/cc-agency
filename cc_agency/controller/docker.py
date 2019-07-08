@@ -729,7 +729,6 @@ class ClientProxy:
             command,
             name=batch_id,
             user='1000:1000',
-            remove=False,
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
