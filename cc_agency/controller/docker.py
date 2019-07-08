@@ -22,7 +22,7 @@ from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experimen
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
-from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
+from cc_agency.commons.helper import batch_failure, calculate_agency_id
 from cc_core.commons.red_to_blue import convert_red_to_blue
 
 CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
@@ -648,9 +648,9 @@ class ClientProxy:
 
     def _run_batch_container(self, batch, experiment):
         """
-        Runs the given batch, with settings described in the given batch and experiment.
-        Sets the state of the given batch to 'processing'.
-        Creates a callback token for the given batch
+        Creates a docker container and runs the given batch, with settings described in the given batch and experiment.
+        Sets the state of the given batch to 'processing'. The created container is added to _started_container_batches
+        together with the batch id.
 
         :param batch: The batch to run
         :type batch: dict
@@ -679,17 +679,6 @@ class ClientProxy:
 
         # set image
         image = experiment['container']['settings']['image']['url']
-
-        token = generate_secret()
-        salt = os.urandom(16)
-        kdf = create_kdf(salt)
-
-        self._mongo.db['callback_tokens'].insert_one({
-            'batch_id': batch_id,
-            'salt': salt,
-            'token': kdf.derive(token.encode('utf-8')),
-            'timestamp': time.time()
-        })
 
         container_blue_agent_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_AGENT_CONTAINER_NAME)
         container_blue_file_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_FILE_CONTAINER_NAME)
