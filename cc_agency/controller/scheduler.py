@@ -277,8 +277,7 @@ class Scheduler:
                         self._mongo,
                         batch_id,
                         debug_info,
-                        None,
-                        self._conf
+                        None
                     )
 
     @staticmethod
@@ -538,7 +537,6 @@ class Scheduler:
                 batch_id,
                 repr(e),
                 None,
-                self._conf,
                 disable_retry_if_failed=True
             )
             return None
@@ -559,7 +557,7 @@ class Scheduler:
         if not Scheduler._check_nodes_possibly_sufficient(nodes, experiment):
             debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"' \
                 .format(next_batch['experimentId'])
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=True)
+            batch_failure(self._mongo, batch_id, debug_info, None, disable_retry_if_failed=True)
             return None
 
         # select node
@@ -597,7 +595,6 @@ class Scheduler:
                 batch_id,
                 debug_info,
                 None,
-                self._conf,
                 disable_retry_if_failed=True
             )
             return None

@@ -210,7 +210,7 @@ class ClientProxy:
             bson_id = batch['_id']
             batch_id = str(bson_id)
             debug_info = 'Node offline: {}'.format(self._node_name)
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _info(self):
         info = self._client.info()
@@ -256,7 +256,7 @@ class ClientProxy:
 
             if batch_id not in containers:
                 debug_info = 'No container assigned.'
-                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+                batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _remove_cancelled_containers(self):
         running_containers = self._batch_containers('running')
@@ -291,7 +291,7 @@ class ClientProxy:
             c.remove()
 
             if batch['state'] == 'processing':
-                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+                batch_failure(self._mongo, batch_id, debug_info, None)
 
     def inspect_offline_node(self):
         try:
@@ -422,7 +422,7 @@ class ClientProxy:
             stderr_logs = container.logs(stdout=False).decode('utf-8')
         except Exception as e:
             debug_info = 'Could not get logs of container: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, None)
             return
 
         data = None
@@ -430,19 +430,19 @@ class ClientProxy:
             data = json.loads(stdout_logs)
         except json.JSONDecodeError as e:
             debug_info = 'CC-Agent data is not a valid json object: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, data, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, data)
             return
 
         try:
             jsonschema.validate(data, callback_schema)
         except jsonschema.ValidationError as e:
             debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, data, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, data)
             return
 
         if data['state'] == 'failed':
             debug_info = 'Batch failed.\nContainer stderr:\n{}\ndebug info:\n{}'.format(stderr_logs, data['debugInfo'])
-            batch_failure(self._mongo, batch_id, debug_info, data, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, data)
             return
 
         batch = self._mongo.db['batches'].find_one(
@@ -773,7 +773,7 @@ class ClientProxy:
         if response['state'] == 'failed':
             debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
             disable_retry = response.get('disable_retry')
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=disable_retry)
+            batch_failure(self._mongo, batch_id, debug_info, None, disable_retry_if_failed=disable_retry)
             raise TrusteeServiceError(debug_info)
 
         batch_secrets = response['secrets']
@@ -837,10 +837,10 @@ class ClientProxy:
         return data_file
 
     def _run_batch_container_failure(self, batch_id, debug_info):
-        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+        batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _pull_image_failure(self, debug_info, batch_id):
-        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+        batch_failure(self._mongo, batch_id, debug_info, None)
 
 
 class TrusteeServiceError(Exception):

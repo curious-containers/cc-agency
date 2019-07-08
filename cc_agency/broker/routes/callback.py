@@ -31,7 +31,7 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
         if response['state'] == 'failed':
             debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
             disable_retry = response.get('disable_retry')
-            batch_failure(mongo, batch_id, debug_info, None, conf, disable_retry_if_failed=disable_retry)
+            batch_failure(mongo, batch_id, debug_info, None, disable_retry_if_failed=disable_retry)
             raise NotFound(debug_info)
 
         batch_secrets = response['secrets']
@@ -73,7 +73,7 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
 
         if not request.json:
             debug_info = 'Callback did not send CC-Agent data as JSON.'
-            batch_failure(mongo, batch_id, debug_info, None, conf)
+            batch_failure(mongo, batch_id, debug_info, None)
             raise BadRequest(debug_info)
 
         data = request.json
@@ -82,12 +82,12 @@ def callback_routes(app, mongo, auth, conf, controller, trustee_client):
             jsonschema.validate(data, callback_schema)
         except Exception:
             debug_info = 'CC-Agent data sent by callback does not comply with jsonschema.'
-            batch_failure(mongo, batch_id, debug_info, data, conf)
+            batch_failure(mongo, batch_id, debug_info, data)
             raise BadRequest(debug_info)
 
         if data['state'] == 'failed':
             debug_info = 'Callback sent state "failed".'
-            batch_failure(mongo, batch_id, debug_info, data, conf)
+            batch_failure(mongo, batch_id, debug_info, data)
 
             return '', 200
 
