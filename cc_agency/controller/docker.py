@@ -417,8 +417,13 @@ class ClientProxy:
         """
         bson_batch_id = ObjectId(batch_id)
 
-        stdout_logs = container.logs(stderr=False)
-        stderr_logs = container.logs(stdout=False)
+        try:
+            stdout_logs = container.logs(stderr=False).decode('utf-8')
+            stderr_logs = container.logs(stdout=False).decode('utf-8')
+        except Exception as e:
+            debug_info = 'Could not get logs of container: {}'.format(str(e))
+            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+            return
 
         data = None
         try:
