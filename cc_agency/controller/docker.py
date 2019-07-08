@@ -17,12 +17,13 @@ from docker.tls import TLSConfig
 from bson.objectid import ObjectId
 
 from cc_agency.commons.schemas.callback import callback_schema
-from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
+from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
+    get_batch_secret_keys
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
-
+from cc_core.commons.red_to_blue import convert_red_to_blue
 
 CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
 BLUE_AGENT_FILE_DIR = 'cc'
@@ -741,7 +742,7 @@ class ClientProxy:
         )  # type: Container
 
         # copy blue agent and blue file to container
-        tar_archive = ClientProxy._create_batch_archive(batch, BLUE_AGENT_FILE_DIR)
+        tar_archive = self._create_batch_archive(batch, BLUE_AGENT_FILE_DIR)
         container.put_archive('/', tar_archive)
         tar_archive.close()
 
@@ -749,15 +750,58 @@ class ClientProxy:
 
         self._started_container_batches.put((container, batch_id))
 
-    @staticmethod
-    def _create_batch_archive(blue_batch, directory):
+    def _create_blue_batch(self, batch):
+        """
+        Creates a dictionary containing the data for a blue batch.
+
+        :param batch: The batch description
+        :type batch: dict
+        :return: A dictionary containing a blue batch
+        :rtype: dict
+        :raise TrusteeServiceError: If the trustee service is unavailable or unable to collect the requested secret keys
+        :raise ValueError: If there was more than one blue batch after red_to_blue
+        """
+        batch_id = str(batch['_id'])
+        batch_secret_keys = get_batch_secret_keys(batch)
+        response = self._trustee_client.collect(batch_secret_keys)
+
+        if response['state'] == 'failed':
+            debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
+            disable_retry = response.get('disable_retry')
+            batch_failure(self._mongo, batch_id, debug_info, None, self._conf, disable_retry_if_failed=disable_retry)
+            raise TrusteeServiceError(debug_info)
+
+        batch_secrets = response['secrets']
+        batch = fill_batch_secrets(batch, batch_secrets)
+
+        experiment_id = batch['experimentId']
+
+        experiment = self._mongo.db['experiments'].find_one(
+            {'_id': ObjectId(experiment_id)}
+        )
+
+        red_data = {
+            'redVersion': experiment['redVersion'],
+            'cli': experiment['cli'],
+            'inputs': batch['inputs'],
+            'outputs': batch['outputs']
+        }
+
+        blue_batches = convert_red_to_blue(red_data)
+
+        if len(blue_batches) != 1:
+            raise ValueError('Got {} batches, but only one was asserted.'.format(len(blue_batches)))
+
+        return blue_batches[0]
+
+    def _create_batch_archive(self, batch, directory):
         """
         Creates a tar archive. This archive contains the blue agent and a blue file. The blue file is filled with the
         given blue data. The blue agent and the blue file are stored inside the given directory. The tar archive and all
         files contained in this archive are in memory and are never stored in the local filesystem.
 
-        :param blue_batch: The data to put into the blue file of the returned archive
-        :type blue_batch: dict
+        :param batch: The data to put into the blue file of the returned archive
+        :type batch: dict
         :param directory: Inside the archive the blue agent and the blue batch is located under the given directory
         :type directory: str
         :return: A tar archive containing the blue agent and the given blue batch
@@ -772,6 +816,7 @@ class ClientProxy:
 
         # add blue file
         blue_batch_name = os.path.join(directory, BLUE_FILE_CONTAINER_NAME)
+        blue_batch = self._create_blue_batch(batch)
         blue_batch_content = json.dumps(blue_batch).encode('utf-8')
 
         # see https://bugs.python.org/issue22208 for more information
