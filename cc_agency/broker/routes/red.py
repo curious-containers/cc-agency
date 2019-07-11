@@ -1,11 +1,11 @@
 import jsonschema
 from time import time
 
+from cc_core.commons.red import red_validation
 from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
-from cc_core.commons.schemas.red import red_schema
 from cc_core.commons.engines import engine_validation
 from cc_core.commons.templates import get_template_keys, get_secret_values, normalize_keys
 from cc_core.commons.exceptions import exception_format
@@ -93,10 +93,10 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         data = request.json
 
         try:
-            jsonschema.validate(data, red_schema)
-        except Exception:
+            red_validation(data, False)
+        except Exception as e:
             raise BadRequest('Given RED data does not comply with jsonschema. '
-                             'Consider using the FAICE commandline tools for local validation.')
+                             'Consider using the FAICE commandline tools for local validation.\n{}'.format(str(e)))
 
         template_keys = set()
         get_template_keys(data, template_keys)

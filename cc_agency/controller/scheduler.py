@@ -705,7 +705,3 @@ class Scheduler:
         ])
         for b in cursor:
             yield b
-
-
-class InsufficientNodesException(Exception):
-    pass
