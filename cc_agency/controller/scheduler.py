@@ -505,15 +505,73 @@ class Scheduler:
         scheduled_nodes = []
         cluster_nodes = self._get_cluster_state()
 
+        batch_count_cache = {}  # type: Dict[str, int]
+
         # select batch to be scheduled
         for next_batch in self._fifo():
-            node_name = self._schedule_batch(next_batch, cluster_nodes)
+            node_name = self._schedule_batch(next_batch, cluster_nodes, batch_count_cache)
 
             if node_name is not None:
                 cluster_nodes = self._get_cluster_state()
                 scheduled_nodes.append((next_batch['_id'], node_name))
 
-    def _schedule_batch(self, next_batch, nodes):
+        # ClientProxies clean up
+        for cluster_node in cluster_nodes:
+            node_name = cluster_node.node_name
+            client_proxy = self._nodes[node_name]
+
+            if not client_proxy.put_action({'action': 'clean_up'}):
+                continue
+
+        # inform ClientProxies about new batches
+        for batch_id, node_name in scheduled_nodes:
+            client_proxy = self._nodes[node_name]
+            check_for_batches_data = {
+                'action': 'check_for_batches'
+            }
+
+            if not client_proxy.put_action(check_for_batches_data):
+                debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
+                    node_name
+                )
+                batch_failure(
+                    self._mongo,
+                    batch_id,
+                    debug_info,
+                    None,
+                    self._conf
+                )
+
+    def _get_number_of_batches_of_experiment(self, experiment_id, batch_count_cache):
+        """
+        Returns the number of batches, that are scheduled or processing of the given experiment.
+        This number can be a overestimation of the real number.
+
+        If the given experiment id is a key in batch_count_cache, the corresponding value is returned.
+        If not the db is queried and an entry in batch_count_cache is created containing the queried data.
+
+        After this function batch_count_cache always contains the experiment id as key.
+
+        :param experiment_id: Defines the experiment, whose number of batches is returned
+        :type experiment_id: str
+        :param batch_count_cache: A dictionary mapping experiment ids to the number of batches of this experiment, which
+                                  in state processing or scheduled. This dictionary is allowed to overestimate the
+                                  number of batches.
+        :type batch_count_cache: Dict[str, int]
+        :return: The number of batches in state scheduled or processing of the given experiment id
+        :rtype: int
+        """
+        if experiment_id in batch_count_cache:
+            batch_count = batch_count_cache[experiment_id]
+        else:
+            batch_count = self._mongo.db['batches'].count({
+                'experimentId': experiment_id,
+                'state': {'$in': ['scheduled', 'processing']}
+            })
+            batch_count_cache[experiment_id] = batch_count
+        return batch_count
+
+    def _schedule_batch(self, next_batch, nodes, batch_count_cache):
         """
         Tries to find a node that is capable of processing the given batch. If no capable node could be found, None is
         returned.
@@ -522,6 +580,10 @@ class Scheduler:
 
         :param next_batch: The batch to schedule.
         :param nodes: The nodes on which the batch should be scheduled.
+        :param batch_count_cache: A dictionary mapping experiment ids to the number of batches of this experiment, which
+                                  in state processing or scheduled. This dictionary is allowed to overestimate the
+                                  number of batches.
+        :type batch_count_cache: Dict[str, int]
         :return: The name of the node on which the given batch is scheduled
         If the batch could not be scheduled None is returned
         :raise TrusteeServiceError: If the trustee service is unavailable.
@@ -545,10 +607,9 @@ class Scheduler:
 
         # limit the number of currently executed batches from a single experiment
         concurrency_limit = experiment.get('execution', {}).get('settings', {}).get('batchConcurrencyLimit', 64)
-        batch_count = self._mongo.db['batches'].count({
-            'experimentId': experiment_id,
-            'state': {'$in': ['scheduled', 'processing']}
-        })
+
+        # number of batches which are scheduled or processing of the given experiment
+        batch_count = self._get_number_of_batches_of_experiment(experiment_id, batch_count_cache)
 
         if batch_count >= concurrency_limit:
             return None
@@ -624,6 +685,11 @@ class Scheduler:
             }
         )
 
+        # The state of the scheduled batch switched from 'registered' to 'scheduled', so increase the batch_count.
+        # batch_count_cache always contains experiment_id, because _get_number_of_batches_of_experiment()
+        # always inserts the given experiment_id
+        batch_count_cache[experiment_id] += 1
+
         return selected_node.node_name
 
     def _get_experiment_of_batch(self, experiment_id):
@@ -677,7 +743,3 @@ class Scheduler:
         ])
         for b in cursor:
             yield b
-
-
-class InsufficientNodesException(Exception):
-    pass

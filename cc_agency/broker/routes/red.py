@@ -1,5 +1,6 @@
 from time import time
 
+from cc_core.commons.red import red_validation
 from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
