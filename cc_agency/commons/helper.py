@@ -43,7 +43,7 @@ def create_kdf(salt):
     )
 
 
-def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_failed=False):
+def batch_failure(mongo, batch_id, debug_info, ccagent, disable_retry_if_failed=False):
     """
     Changes the db entry of the given batch to failed, if disable_retry_if_failed is set to True or if the maximal
     number of retries is exceeded. Otherwise the new state of the given batch is set to registered.
@@ -53,7 +53,6 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_f
     :type batch_id: str
     :param debug_info: The debug info to write to the db
     :param ccagent: The ccagent to write to the db
-    :param conf:
     :param disable_retry_if_failed: If set to True, the batch is failed immediately, without giving another attempt
     """
     bson_id = ObjectId(batch_id)

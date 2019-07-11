@@ -1,26 +1,35 @@
+import io
+import json
 import os
+import queue
+import tarfile
 from queue import Queue
 from threading import Thread
 import concurrent.futures
-from time import time
+import time
 from traceback import format_exc
 from typing import List, Tuple, Dict
-from uuid import uuid4
 
 import docker
+import jsonschema
+from docker.models.containers import Container
 from docker.tls import TLSConfig
 from bson.objectid import ObjectId
 
-from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
+from cc_agency.commons.schemas.callback import callback_schema
+from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
+    get_batch_secret_keys
 from cc_core.commons.engines import engine_to_runtime
-from cc_core.commons.exceptions import exception_format
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
-from cc_agency.commons.helper import generate_secret, create_kdf, batch_failure, calculate_agency_id
-from cc_agency.commons.build_dir import build_dir_path
-
+from cc_agency.commons.helper import batch_failure, calculate_agency_id
+from cc_core.commons.red_to_blue import convert_red_to_blue
 
 CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
+BLUE_AGENT_FILE_DIR = 'cc'
+BLUE_AGENT_CONTAINER_NAME = 'blue_agent.py'
+BLUE_FILE_CONTAINER_NAME = 'blue_file.json'
+CHECK_RUNNING_CONTAINERS_INTERVAL = 1.0
 
 
 class ImagePullResult:
@@ -65,10 +74,20 @@ def _pull_image(docker_client, image_url, auth, depending_batches):
     """
     try:
         docker_client.images.pull(image_url, auth_config=auth)
-    except:
-        return ImagePullResult(image_url, auth, False, exception_format(), depending_batches)
+    except Exception as e:
+        debug_info = str(e).split('\n')
+        return ImagePullResult(image_url, auth, False, debug_info, depending_batches)
 
     return ImagePullResult(image_url, auth, True, None, depending_batches)
+
+
+def _get_blue_agent_host_path():
+    """
+    :return: the absolute path to the blue agent of the host system
+    :rtype: str
+    """
+    import cc_core.agent.blue.__main__ as blue_main
+    return blue_main.__file__
 
 
 class ClientProxy:
@@ -80,7 +99,9 @@ class ClientProxy:
         self._mongo = mongo
         self._trustee_client = trustee_client
 
-        self._build_dir = build_dir_path(conf)
+        # queue and list containing tuples of docker containers together with the batch id running inside this container
+        self._started_container_batches = queue.Queue()  # type: Queue[Tuple[Container, str]]
+        self._running_container_batches = []  # type: List[Tuple[Container, str]]
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
         self._base_url = node_conf['base_url']
@@ -99,7 +120,6 @@ class ClientProxy:
 
         # using hash of external url to distinguish between volume names created by different agency installations
         self._agency_id = calculate_agency_id(conf)
-        self._blue_agent_volume = None
 
         node = {
             'nodeName': node_name,
@@ -122,6 +142,7 @@ class ClientProxy:
 
         self._action_q = Queue()
         Thread(target=self._action_loop).start()
+        Thread(target=self._check_running_containers_loop).start()
         self._set_online(ram, cpus)
         self._action_q.put({'action': 'inspect'})
 
@@ -148,7 +169,7 @@ class ClientProxy:
                 '$push': {
                     'history': {
                         'state': 'online',
-                        'time': time(),
+                        'time': time.time(),
                         'debugInfo': None
                     }
                 }
@@ -158,7 +179,7 @@ class ClientProxy:
 
     def _set_offline(self, debug_info):
         print('Node offline:', self._node_name)
-        timestamp = time()
+        timestamp = time.time()
 
         self._online = False
         bson_node_id = ObjectId(self._node_id)
@@ -189,7 +210,7 @@ class ClientProxy:
             bson_id = batch['_id']
             batch_id = str(bson_id)
             debug_info = 'Node offline: {}'.format(self._node_name)
-            batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+            batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _info(self):
         info = self._client.info()
@@ -235,7 +256,7 @@ class ClientProxy:
 
             if batch_id not in containers:
                 debug_info = 'No container assigned.'
-                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+                batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _remove_cancelled_containers(self):
         running_containers = self._batch_containers('running')
@@ -270,14 +291,12 @@ class ClientProxy:
             c.remove()
 
             if batch['state'] == 'processing':
-                batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+                batch_failure(self._mongo, batch_id, debug_info, None)
 
     def inspect_offline_node(self):
         try:
             self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
             ram, cpus = self._info()
-            if self._blue_agent_volume is None:
-                self._init_blue_agent(self._build_dir)
             self._inspect()
         except Exception:
             self._client = None
@@ -346,11 +365,8 @@ class ClientProxy:
 
             if inspect:
                 try:
-                    if self._blue_agent_volume is None:
-                        self._init_blue_agent(self._build_dir)
                     self._inspect()
                 except Exception:
-                    self._blue_agent_volume = None
                     self._set_offline(format_exc())
                     self._action_q = None
                     self._client = None
@@ -358,35 +374,103 @@ class ClientProxy:
             if not self._online:
                 return
 
-    def _init_blue_agent(self, build_dir):
-        self._client.images.build(path=build_dir, tag='blue-agent')
+    def _check_running_containers_loop(self):
+        """
+        Checks running containers and processes them after exiting.
+        Retrieves all started containers from the _started_container_batches queue and appends them to the
+        _running_container_batches list. Checks whether a running container exited and processes it.
+        """
+        while True:
+            try:
+                # noinspection PyTypeChecker
+                for started_container_batch in iter(
+                        self._started_container_batches.get_nowait,
+                        self._started_container_batches
+                ):
+                    self._running_container_batches.append(started_container_batch)
+            except queue.Empty:
+                pass
 
-        for volume in self._client.volumes.list():
-            if volume.name.startswith(self._agency_id):
-                try:
-                    volume.remove()
-                except Exception:
-                    pass
+            exited_containers = []
 
-        blue_agent_volume = '{}-{}'.format(self._agency_id, str(uuid4()))
+            for running_container, batch_id in self._running_container_batches:
+                running_container.reload()
 
-        binds = {
-            blue_agent_volume: {
-                'bind': os.path.join('/vol'),
-                'mode': 'rw'
+                if running_container.status != 'running':
+                    self._check_exited_container(running_container, batch_id)
+                    exited_containers.append((running_container, batch_id))
+
+            # remove exited containers
+            for exited_container, batch_id in exited_containers:
+                self._running_container_batches.remove((exited_container, batch_id))
+
+            time.sleep(CHECK_RUNNING_CONTAINERS_INTERVAL)
+
+    def _check_exited_container(self, container, batch_id):
+        """
+        Inspects the logs of the given exited container and updates the database accordingly.
+
+        :param container: The container to inspect
+        :type container: Container
+        :param batch_id: The batch id, that was processed inside the given container
+        :type batch_id: str
+        """
+        bson_batch_id = ObjectId(batch_id)
+
+        try:
+            stdout_logs = container.logs(stderr=False).decode('utf-8')
+            stderr_logs = container.logs(stdout=False).decode('utf-8')
+        except Exception as e:
+            debug_info = 'Could not get logs of container: {}'.format(str(e))
+            batch_failure(self._mongo, batch_id, debug_info, None)
+            return
+
+        data = None
+        try:
+            data = json.loads(stdout_logs)
+        except json.JSONDecodeError as e:
+            debug_info = 'CC-Agent data is not a valid json object: {}'.format(str(e))
+            batch_failure(self._mongo, batch_id, debug_info, data)
+            return
+
+        try:
+            jsonschema.validate(data, callback_schema)
+        except jsonschema.ValidationError as e:
+            debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
+            batch_failure(self._mongo, batch_id, debug_info, data)
+            return
+
+        if data['state'] == 'failed':
+            debug_info = 'Batch failed.\nContainer stderr:\n{}\ndebug info:\n{}'.format(stderr_logs, data['debugInfo'])
+            batch_failure(self._mongo, batch_id, debug_info, data)
+            return
+
+        batch = self._mongo.db['batches'].find_one(
+            {'_id': bson_batch_id, 'state': 'processing'},
+            {'attempts': 1, 'node': 1}
+        )
+        if not batch:
+            raise ValueError('batch id "{}" not found.'.format(batch_id))
+
+        self._mongo.db['batches'].update(
+            {'_id': bson_batch_id},
+            {
+                '$set': {
+                    'state': 'succeeded'
+                },
+                '$push': {
+                    'history': {
+                        'state': 'succeeded',
+                        'time': time.time(),
+                        'debugInfo': None,
+                        'node': batch['node'],
+                        'ccagent': data
+                    }
+                }
             }
-        }
-
-        command = 'cp /cc/blue_agent.py /vol'
-
-        self._client.containers.run(
-            'blue-agent',
-            command,
-            remove=True,
-            volumes=binds
         )
 
-        self._blue_agent_volume = blue_agent_volume
+        container.remove()
 
     def _check_for_batches(self):
         """
@@ -558,15 +642,15 @@ class ClientProxy:
         """
         try:
             self._run_batch_container(batch, experiment)
-        except:
+        except Exception as e:
             batch_id = str(batch['_id'])
-            self._run_batch_container_failure(batch_id, format_exc())
+            self._run_batch_container_failure(batch_id, str(e))
 
     def _run_batch_container(self, batch, experiment):
         """
-        Runs the given batch, with settings described in the given batch and experiment.
-        Sets the state of the given batch to 'processing'.
-        Creates a callback token for the given batch
+        Creates a docker container and runs the given batch, with settings described in the given batch and experiment.
+        Sets the state of the given batch to 'processing'. The created container is added to _started_container_batches
+        together with the batch id.
 
         :param batch: The batch to run
         :type batch: dict
@@ -596,35 +680,21 @@ class ClientProxy:
         # set image
         image = experiment['container']['settings']['image']['url']
 
-        token = generate_secret()
-        salt = os.urandom(16)
-        kdf = create_kdf(salt)
-
-        self._mongo.db['callback_tokens'].insert_one({
-            'batch_id': batch_id,
-            'salt': salt,
-            'token': kdf.derive(token.encode('utf-8')),
-            'timestamp': time()
-        })
+        container_blue_agent_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_AGENT_CONTAINER_NAME)
+        container_blue_file_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_FILE_CONTAINER_NAME)
 
         command = [
             'python3',
-            '/cc/blue_agent.py',
+            container_blue_agent_path,
             '--outputs',
-            '{}/callback/{}/{}'.format(self._external_url, batch_id, token)
+            '--debug',
+            container_blue_file_path
         ]
 
-        command = ' '.join([str(c) for c in command])
+        command = ' '.join(command)
 
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
-
-        binds = {
-            self._blue_agent_volume: {
-                'bind': '/cc',
-                'mode': 'ro'
-            }
-        }
 
         self._mongo.db['batches'].update_one(
             {'_id': ObjectId(batch_id)},
@@ -635,7 +705,7 @@ class ClientProxy:
                 '$push': {
                     'history': {
                         'state': 'processing',
-                        'time': time(),
+                        'time': time.time(),
                         'debugInfo': None,
                         'node': self._node_name,
                         'ccagent': None
@@ -649,29 +719,117 @@ class ClientProxy:
         if existing_container is not None:
             existing_container.remove(force=True)
 
-        self._client.containers.run(
+        container = self._client.containers.create(
             image,
             command,
             name=batch_id,
             user='1000:1000',
-            remove=False,
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
             runtime=runtime,
             environment=environment,
             network=self._network,
-            volumes=binds,
             devices=devices,
             cap_add=capabilities,
             security_opt=security_opt
+        )  # type: Container
+
+        # copy blue agent and blue file to container
+        tar_archive = self._create_batch_archive(batch, BLUE_AGENT_FILE_DIR)
+        container.put_archive('/', tar_archive)
+        tar_archive.close()
+
+        container.start()
+
+        self._started_container_batches.put((container, batch_id))
+
+    def _create_blue_batch(self, batch):
+        """
+        Creates a dictionary containing the data for a blue batch.
+
+        :param batch: The batch description
+        :type batch: dict
+        :return: A dictionary containing a blue batch
+        :rtype: dict
+        :raise TrusteeServiceError: If the trustee service is unavailable or unable to collect the requested secret keys
+        :raise ValueError: If there was more than one blue batch after red_to_blue
+        """
+        batch_id = str(batch['_id'])
+        batch_secret_keys = get_batch_secret_keys(batch)
+        response = self._trustee_client.collect(batch_secret_keys)
+
+        if response['state'] == 'failed':
+            debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
+            disable_retry = response.get('disable_retry')
+            batch_failure(self._mongo, batch_id, debug_info, None, disable_retry_if_failed=disable_retry)
+            raise TrusteeServiceError(debug_info)
+
+        batch_secrets = response['secrets']
+        batch = fill_batch_secrets(batch, batch_secrets)
+
+        experiment_id = batch['experimentId']
+
+        experiment = self._mongo.db['experiments'].find_one(
+            {'_id': ObjectId(experiment_id)}
         )
 
+        red_data = {
+            'redVersion': experiment['redVersion'],
+            'cli': experiment['cli'],
+            'inputs': batch['inputs'],
+            'outputs': batch['outputs']
+        }
+
+        blue_batches = convert_red_to_blue(red_data)
+
+        if len(blue_batches) != 1:
+            raise ValueError('Got {} batches, but only one was asserted.'.format(len(blue_batches)))
+
+        return blue_batches[0]
+
+    def _create_batch_archive(self, batch, directory):
+        """
+        Creates a tar archive. This archive contains the blue agent and a blue file. The blue file is filled with the
+        given blue data. The blue agent and the blue file are stored inside the given directory. The tar archive and all
+        files contained in this archive are in memory and are never stored in the local filesystem.
+
+        :param batch: The data to put into the blue file of the returned archive
+        :type batch: dict
+        :param directory: Inside the archive the blue agent and the blue batch is located under the given directory
+        :type directory: str
+        :return: A tar archive containing the blue agent and the given blue batch
+        :rtype: io.BytesIO or bytes
+        """
+        data_file = io.BytesIO()
+        tar_file = tarfile.open(mode='w', fileobj=data_file)
+
+        # add blue agent
+        agent_archive_name = os.path.join(directory, BLUE_AGENT_CONTAINER_NAME)
+        tar_file.add(_get_blue_agent_host_path(), arcname=agent_archive_name, recursive=False)
+
+        # add blue file
+        blue_batch_name = os.path.join(directory, BLUE_FILE_CONTAINER_NAME)
+        blue_batch = self._create_blue_batch(batch)
+        blue_batch_content = json.dumps(blue_batch).encode('utf-8')
+
+        # see https://bugs.python.org/issue22208 for more information
+        blue_batch_tarinfo = tarfile.TarInfo(blue_batch_name)
+        blue_batch_tarinfo.size = len(blue_batch_content)
+
+        tar_file.addfile(blue_batch_tarinfo, io.BytesIO(blue_batch_content))
+
+        # close file
+        tar_file.close()
+        data_file.seek(0)
+
+        return data_file
+
     def _run_batch_container_failure(self, batch_id, debug_info):
-        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+        batch_failure(self._mongo, batch_id, debug_info, None)
 
     def _pull_image_failure(self, debug_info, batch_id):
-        batch_failure(self._mongo, batch_id, debug_info, None, self._conf)
+        batch_failure(self._mongo, batch_id, debug_info, None)
 
 
 class TrusteeServiceError(Exception):
