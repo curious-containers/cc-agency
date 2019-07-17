@@ -30,20 +30,10 @@ def main():
     conf = Conf(args.conf_file)
     mongo = Mongo(conf)
 
-    print('Create MongoDB index for experiments collection:')
-    indexes = mongo.db['experiments'].create_index({
-        'username': 'hashed'
-    })
-    print(indexes)
-    print('Create MongoDB index for batches collection:')
-    indexes = mongo.db['batches'].create_index({
-        'username': 'hashed',
-        'node': 'hashed',
-        'state': 'hashed',
-        'experimentId': 'hashed',
-        'registrationTime': 1
-    })
-    print(indexes)
+    print('Create MongoDB indexes for batches collection:')
+    print(mongo.db['batches'].create_index({'node': 'hashed'}))
+    print(mongo.db['batches'].create_index({'state': 'hashed'}))
+    print(mongo.db['batches'].create_index({'registrationTime': 1}))
 
     trustee_client = TrusteeClient(conf)
     scheduler = Scheduler(conf, mongo, trustee_client)
