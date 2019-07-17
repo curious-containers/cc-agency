@@ -3,6 +3,7 @@ from argparse import ArgumentParser
 import atexit
 
 import zmq
+import pymongo
 
 from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
@@ -31,9 +32,9 @@ def main():
     mongo = Mongo(conf)
 
     print('Create MongoDB indexes for batches collection:')
-    print(mongo.db['batches'].create_index({'node': 'hashed'}))
-    print(mongo.db['batches'].create_index({'state': 'hashed'}))
-    print(mongo.db['batches'].create_index({'registrationTime': 1}))
+    print(mongo.db['batches'].create_index([('node', pymongo.HASHED)]))
+    print(mongo.db['batches'].create_index([('state', pymongo.HASHED)]))
+    print(mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)]))
 
     trustee_client = TrusteeClient(conf)
     scheduler = Scheduler(conf, mongo, trustee_client)
