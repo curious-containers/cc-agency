@@ -31,12 +31,12 @@ def main():
     mongo = Mongo(conf)
 
     print('Create MongoDB index for experiments collection:')
-    indexes = mongo.db['experiments'].createIndex({
+    indexes = mongo.db['experiments'].create_index({
         'username': 'hashed'
     })
     print(indexes)
     print('Create MongoDB index for batches collection:')
-    indexes = mongo.db['batches'].createIndex({
+    indexes = mongo.db['batches'].create_index({
         'username': 'hashed',
         'node': 'hashed',
         'state': 'hashed',
