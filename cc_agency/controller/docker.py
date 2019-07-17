@@ -17,6 +17,7 @@ from cc_agency.commons.build_dir import build_dir_path
 
 
 CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
+NOFILE_LIMIT = 4096
 
 
 class ClientProxy:
@@ -526,7 +527,8 @@ class ClientProxy:
             volumes=binds,
             devices=devices,
             cap_add=capabilities,
-            security_opt=security_opt
+            security_opt=security_opt,
+            ulimits=[docker.types.Ulimit(name='nofile', soft=NOFILE_LIMIT, hard=NOFILE_LIMIT)]
         )
 
     def _run_batch_container_failure(self, batch_id, debug_info):
