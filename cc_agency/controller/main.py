@@ -39,6 +39,7 @@ def main():
     mongo.db['batches'].create_index([('username', pymongo.HASHED)])
     mongo.db['batches'].create_index([('node', pymongo.HASHED)])
     mongo.db['batches'].create_index([('state', pymongo.HASHED)])
+    mongo.db['batches'].create_index([('experimentId', pymongo.HASHED)])
     mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)])
     mongo.db['batches'].create_index([('registrationTime', pymongo.DESCENDING)])
 
