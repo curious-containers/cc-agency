@@ -33,15 +33,9 @@ def main():
     mongo = Mongo(conf)
 
     # MongoDB indexes
-    mongo.db['experiments'].create_index([('username', pymongo.HASHED)])
-    mongo.db['experiments'].create_index([('registrationTime', pymongo.DESCENDING)])
-
-    mongo.db['batches'].create_index([('username', pymongo.HASHED)])
-    mongo.db['batches'].create_index([('node', pymongo.HASHED)])
-    mongo.db['batches'].create_index([('state', pymongo.HASHED)])
-    mongo.db['batches'].create_index([('experimentId', pymongo.HASHED)])
-    mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)])
-    mongo.db['batches'].create_index([('registrationTime', pymongo.DESCENDING)])
+    mongo.db['batches'].create_index([('state', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('protectedKeysVoided', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('notificationsSent', pymongo.ASCENDING)])
 
     print('MongoDB Indexes:')
     pprint(list(mongo.db['experiments'].list_indexes()) + list(mongo.db['batches'].list_indexes()))
