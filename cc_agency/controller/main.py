@@ -36,6 +36,7 @@ def main():
     mongo.db['batches'].create_index([('state', pymongo.ASCENDING)])
     mongo.db['batches'].create_index([('protectedKeysVoided', pymongo.ASCENDING)])
     mongo.db['batches'].create_index([('notificationsSent', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('experimentId', pymongo.ASCENDING)])
 
     print('MongoDB Indexes:')
     pprint(list(mongo.db['experiments'].list_indexes()) + list(mongo.db['batches'].list_indexes()))
