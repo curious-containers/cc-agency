@@ -42,12 +42,13 @@ def main():
     mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)])
     mongo.db['batches'].create_index([('registrationTime', pymongo.DESCENDING)])
 
+    print('MongoDB Indexes')
+    pprint(list(mongo.db['experiments'].list_indexes()))
+    pprint(list(mongo.db['batches'].list_indexes()))
+
     # Singletons
     trustee_client = TrusteeClient(conf)
     scheduler = Scheduler(conf, mongo, trustee_client)
-
-    pprint(list(mongo.db['experiments'].list_indexes()))
-    pprint(list(mongo.db['batches'].list_indexes()))
 
     # ZeroMQ socket
     bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
