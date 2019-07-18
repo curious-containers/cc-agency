@@ -1,10 +1,8 @@
 import io
 import json
 import os
-import queue
 import tarfile
-from queue import Queue
-from threading import Thread
+from threading import Thread, Event
 import concurrent.futures
 import time
 from traceback import format_exc
@@ -14,7 +12,9 @@ import docker
 import jsonschema
 from docker.models.containers import Container
 from docker.tls import TLSConfig
+import docker.errors
 from bson.objectid import ObjectId
+import bson.errors
 
 from cc_agency.commons.schemas.callback import callback_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
@@ -29,7 +29,9 @@ CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
 BLUE_AGENT_FILE_DIR = 'cc'
 BLUE_AGENT_CONTAINER_NAME = 'blue_agent.py'
 BLUE_FILE_CONTAINER_NAME = 'blue_file.json'
-CHECK_RUNNING_CONTAINERS_INTERVAL = 1.0
+CHECK_EXITED_CONTAINERS_INTERVAL = 1.0
+OFFLINE_INSPECTION_INTERVAL = 10
+CHECK_FOR_BATCHES_INTERVAL = 20
 
 
 class ImagePullResult:
@@ -91,6 +93,41 @@ def _get_blue_agent_host_path():
 
 
 class ClientProxy:
+    """
+    A client proxy handles a cluster node and the docker client of this node.
+    It takes over the following tasks:
+    - It queries the db for new batches, that got scheduled to this node to start them
+    - It queries the docker client for containers, which are finished and updates the db accordingly
+    - It queries the db to remove cancelled containers
+    - If an error occurred it tries to reinitialize the docker client
+
+    A client proxy contains a "online-flag" implemented as threading.Event. Any thread inside this client proxy except
+    the inspection loop should wait for this event to be set, before starting a new execution cycle.
+    Only the inspect-thread is allowed to set/clear the "online-flag" after successful/failed inspection.
+
+    On error the check_for_batches and check_exited_containers-threads can trigger an inspection.
+
+    inspect:
+      If this ClientProxy is offline regularly inspects the connection to the docker daemon. If the inspection failed,
+      the "online-flag" is cleared and this node is set to offline.
+
+      If this ClientProxy is online inspect the docker engine, by starting a docker container and examine the result
+      of this execution. If the execution was successful, set the "online-flag" and make this node online, otherwise
+      repeat in some interval.
+
+    check-for-batches:
+      Regularly queries the database for batches, which are scheduled to this node. All found batches are then started
+      with the docker client, if online. This can be triggered manually by setting the check-for-batches-event.
+      If this client proxy is changed to be offline this thread processes the current cycle until it has finished and
+      then waits for the "online-flag" to be set.
+
+    check-exited-containers:
+      Regularly queries the containers from the docker client and the database, which are currently running on this
+      node. Checks the containers, which are not running anymore and handles their execution result. This can be
+      triggered by setting the check_exited_containers-flag.
+      If this client proxy is changed to be offline this thread processes the current cycle until it has finished and
+      then waits for the "online-flag" to be set.
+    """
     NUM_WORKERS = 4
 
     def __init__(self, node_name, conf, mongo, trustee_client):
@@ -98,10 +135,6 @@ class ClientProxy:
         self._conf = conf
         self._mongo = mongo
         self._trustee_client = trustee_client
-
-        # queue and list containing tuples of docker containers together with the batch id running inside this container
-        self._started_container_batches = queue.Queue()  # type: Queue[Tuple[Container, str]]
-        self._running_container_batches = []  # type: List[Tuple[Container, str]]
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
         self._base_url = node_conf['base_url']
@@ -112,15 +145,10 @@ class ClientProxy:
         self._environment = node_conf.get('environment')
         self._network = node_conf.get('network')
 
-        self._external_url = conf.d['broker']['external_url'].rstrip('/')
-
-        self._action_q = None
-        self._client = None
-        self._online = None
-
         # using hash of external url to distinguish between volume names created by different agency installations
         self._agency_id = calculate_agency_id(conf)
 
+        # create db entry for this node
         node = {
             'nodeName': node_name,
             'state': None,
@@ -132,31 +160,33 @@ class ClientProxy:
         bson_node_id = self._mongo.db['nodes'].insert_one(node).inserted_id
         self._node_id = str(bson_node_id)
 
-        try:
-            self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
-            ram, cpus = self._info()
-            self._fail_batches_without_assigned_container()  # in case of agency restart
-        except Exception:
+        # init docker client
+        self._client = None
+        self._online = Event()  # type: Event
+
+        self._inspection_event = Event()  # type: Event
+        self._check_for_batches_event = Event()  # type: Event
+        self._check_exited_containers_event = Event()  # type: Event
+
+        if not self._init_docker_client():
+            self.do_inspect()
             self._set_offline(format_exc())
             return
 
-        self._action_q = Queue()
-        Thread(target=self._action_loop).start()
-        Thread(target=self._check_running_containers_loop).start()
-        self._set_online(ram, cpus)
-        self._action_q.put({'action': 'inspect'})
+        Thread(target=self._inspection_loop).start()
+        Thread(target=self._check_for_batches_loop).start()
+        Thread(target=self._check_exited_containers_loop).start()
 
         # initialize Executor Pools
         self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
         self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
 
     def is_online(self):
-        return bool(self._online)
+        return self._online.is_set()
 
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
 
-        self._online = True
         bson_node_id = ObjectId(self._node_id)
         self._mongo.db['nodes'].update_one(
             {'_id': bson_node_id},
@@ -175,13 +205,15 @@ class ClientProxy:
                 }
             }
         )
-        self._action_q.put({'action': 'init_cc_core'})
+
+        self._online.set()  # start _check_batch_containers and _check_exited_containers
 
     def _set_offline(self, debug_info):
         print('Node offline:', self._node_name)
-        timestamp = time.time()
 
-        self._online = False
+        self._online.clear()
+
+        timestamp = time.time()
         bson_node_id = ObjectId(self._node_id)
         self._mongo.db['nodes'].update_one(
             {'_id': bson_node_id},
@@ -203,14 +235,14 @@ class ClientProxy:
                 'node': self._node_name,
                 'state': {'$in': ['scheduled', 'processing']}
             },
-            {'_id': 1}
+            {'_id': 1, 'state': 1}
         )
 
         for batch in cursor:
             bson_id = batch['_id']
             batch_id = str(bson_id)
             debug_info = 'Node offline: {}'.format(self._node_name)
-            batch_failure(self._mongo, batch_id, debug_info, None)
+            batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
 
     def _info(self):
         info = self._client.info()
@@ -219,22 +251,34 @@ class ClientProxy:
         return ram, cpus
 
     def _batch_containers(self, status):
-        batch_containers = {}
+        """
+        Returns a dictionary that maps container names to the corresponding container.
+        If this client proxy is offline, the result will always be an empty dictionary.
 
-        if not self._online:
+        :param status: A status string. Containers, which have a different state are not contained in the result of this
+                       function
+        :type status: str or None
+        :return: A dictionary mapping container names to docker containers
+        :rtype: Dict[str, Container]
+
+        :raise docker.errors.DockerException: If the docker engine returns an error
+        """
+        batch_containers = {}  # type: Dict[str, Container]
+
+        if not self.is_online():
             return batch_containers
 
         filters = {'status': status}
         if status is None:
             filters = None
 
-        containers = self._client.containers.list(all=True, limit=-1, filters=filters)
+        containers = self._client.containers.list(all=True, limit=-1, filters=filters)  # type: List[Container]
 
         for c in containers:
             try:
                 ObjectId(c.name)
                 batch_containers[c.name] = c
-            except:
+            except (bson.errors.InvalidId, TypeError):
                 pass
 
         return batch_containers
@@ -247,7 +291,7 @@ class ClientProxy:
                 'node': self._node_name,
                 'state': {'$in': ['processing']}
             },
-            {'_id': 1}
+            {'_id': 1, 'state': 1}
         )
 
         for batch in cursor:
@@ -256,9 +300,14 @@ class ClientProxy:
 
             if batch_id not in containers:
                 debug_info = 'No container assigned.'
-                batch_failure(self._mongo, batch_id, debug_info, None)
+                batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
 
     def _remove_cancelled_containers(self):
+        """
+        Stops all docker containers, whose batches got cancelled.
+
+        :raise docker.errors.DockerException: If the docker server returns an error
+        """
         running_containers = self._batch_containers('running')
 
         cursor = self._mongo.db['batches'].find(
@@ -269,160 +318,148 @@ class ClientProxy:
             {'_id': 1}
         )
         for batch in cursor:
-            bson_id = batch['_id']
-            batch_id = str(bson_id)
+            batch_id = str(batch['_id'])
 
             c = running_containers[batch_id]
             c.remove(force=True)
 
-    def _remove_exited_containers(self):
-        exited_containers = self._batch_containers('exited')
+    def _can_execute_container(self):
+        """
+        Tries to execute a docker container using the docker client.
+        :return: A tuple (successful, (ram, cpus)/error)
+                 successful: True, if the docker container could be executed, otherwise False
+                 (ram, cpus)/error: In case of success a tuple containing (ram, cpus), in case of failure the error
+                 message as string.
+        :rtype: tuple[bool, tuple or str]
+        """
+        command = ['echo', 'test']
 
-        cursor = self._mongo.db['batches'].find(
+        try:
+            self._client.containers.run(
+                CURL_IMAGE,
+                command,
+                user='1000:1000',
+                remove=True,
+                environment=self._environment,
+                network=self._network
+            )
+            info = self._info()
+        except docker.errors.DockerException as e:
+            return False, str(e)
+
+        return True, info
+
+    def _inspect_on_error(self):
+        """
+        Inspects the current docker client and sets this node to offline, if the inspection fails.
+        """
+        success, state = self._can_execute_container()
+
+        if not success:
+            self._set_offline(state)
+
+    def _init_docker_client(self):
+        """
+        Tries to reinitialize the docker client. If successful, this node is online after this function execution.
+
+        :return: True, if the initialization succeeded, otherwise False
+        :rtype: bool
+        """
+        init_succeeded = False
+        try:
+            self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
+
+            successful, state = self._can_execute_container()
+            if successful:
+                ram, cpus = state
+                if not self.is_online():
+                    self._set_online(ram, cpus)
+                    init_succeeded = True
+        except docker.errors.DockerException:
+            pass
+        return init_succeeded
+
+    def _inspection_loop(self):
+        """
+        Regularly inspects the connection the docker daemon by running a docker container. If an error was found, clears
+        the "running-flag" and puts in a error token in the inspection queue.
+
+        Waits for errors inside the inspection-queue. If an error token was found inside the inspection-queue, handles
+        this error. Otherwise performs a routine check of the docker client, after a given timeout.
+        If this client proxy is offline, tries to restart it.
+        """
+        while True:
+            if self.is_online():
+                self._inspection_event.wait()
+                self._inspection_event.clear()
+                self._inspect_on_error()
+            else:
+                self._inspection_event.wait(timeout=OFFLINE_INSPECTION_INTERVAL)
+                self._inspection_event.clear()
+                self._init_docker_client()  # tries to reinitialize the docker client
+
+    def _check_exited_containers(self):
+        """
+        Checks all containers which have "recently exited". A container is considered "recently exited", if the docker
+        container is in state 'exited' and the corresponding batch is in state 'processing'.
+
+        After this function execution all "recently exited" containers of this docker client should have batches, which
+        are in one of the following states:
+        - succeeded: If the batch execution was successful
+        - failed: If the batch execution has failed
+
+        :raise docker.errors.DockerException:
+        """
+        exited_containers = self._batch_containers('exited')  # type: Dict[str, Container]
+
+        batch_cursor = self._mongo.db['batches'].find(
             {'_id': {'$in': [ObjectId(_id) for _id in exited_containers]}},
             {'state': 1}
         )
-        for batch in cursor:
-            bson_id = batch['_id']
-            batch_id = str(bson_id)
+        for batch in batch_cursor:
+            batch_id = str(batch['_id'])
 
-            c = exited_containers[batch_id]
-            debug_info = c.logs().decode('utf-8')
-            c.remove()
+            exited_container = exited_containers[batch_id]
 
-            if batch['state'] == 'processing':
-                batch_failure(self._mongo, batch_id, debug_info, None)
+            self._check_exited_container(exited_container, batch)
 
-    def inspect_offline_node(self):
-        try:
-            self._client = docker.DockerClient(base_url=self._base_url, tls=self._tls, version='auto')
-            ram, cpus = self._info()
-            self._inspect()
-        except Exception:
-            self._client = None
-            return
+            exited_container.remove()
 
-        self._action_q = Queue()
-        Thread(target=self._action_loop).start()
-        self._set_online(ram, cpus)
-
-    def _inspect(self):
-        print('Node inspection:', self._node_name)
-
-        command = 'curl -f {}'.format(self._external_url)
-
-        self._client.containers.run(
-            CURL_IMAGE,
-            command,
-            user='1000:1000',
-            remove=True,
-            environment=self._environment,
-            network=self._network
-        )
-
-    def put_action(self, data):
+    def _check_exited_containers_loop(self):
         """
-        Adds the action data into the action_q. Returns if this operation was successful or not.
-
-        :param data: The action data to process
-        :return: True, if the action could be put into the action_queue, otherwise False
-        """
-        if self._action_q is None:
-            return False
-
-        try:
-            self._action_q.put(data)
-        except AttributeError:
-            return False
-        return True
-
-    def _action_loop(self):
-        while True:
-            data = self._action_q.get()
-
-            if 'action' not in data:
-                continue
-
-            action = data['action']
-
-            inspect = False
-
-            if action == 'inspect':
-                inspect = True
-
-            elif action == 'check_for_batches':
-                try:
-                    self._check_for_batches()
-                except Exception:
-                    inspect = True
-
-            elif action == 'clean_up':
-                try:
-                    self._remove_cancelled_containers()
-                    self._remove_exited_containers()
-                except:
-                    inspect = True
-
-            if inspect:
-                try:
-                    self._inspect()
-                except Exception:
-                    self._set_offline(format_exc())
-                    self._action_q = None
-                    self._client = None
-
-            if not self._online:
-                return
-
-    def _check_running_containers_loop(self):
-        """
-        Checks running containers and processes them after exiting.
-        Retrieves all started containers from the _started_container_batches queue and appends them to the
-        _running_container_batches list. Checks whether a running container exited and processes it.
+        Regularly checks exited containers. Waits for this client proxy to come online, before starting a new cycle.
+        Also removes containers, whose batches got cancelled.
         """
         while True:
+            self._online.wait()  # wait for this node to come online
+
+            self._check_exited_containers_event.wait(timeout=CHECK_EXITED_CONTAINERS_INTERVAL)
+            self._check_exited_containers_event.clear()
+
             try:
-                # noinspection PyTypeChecker
-                for started_container_batch in iter(
-                        self._started_container_batches.get_nowait,
-                        self._started_container_batches
-                ):
-                    self._running_container_batches.append(started_container_batch)
-            except queue.Empty:
-                pass
+                self._check_exited_containers()
+                self._remove_cancelled_containers()
+            except docker.errors.DockerException:
+                self.do_inspect()
 
-            exited_containers = []
-
-            for running_container, batch_id in self._running_container_batches:
-                running_container.reload()
-
-                if running_container.status != 'running':
-                    self._check_exited_container(running_container, batch_id)
-                    exited_containers.append((running_container, batch_id))
-
-            # remove exited containers
-            for exited_container, batch_id in exited_containers:
-                self._running_container_batches.remove((exited_container, batch_id))
-
-            time.sleep(CHECK_RUNNING_CONTAINERS_INTERVAL)
-
-    def _check_exited_container(self, container, batch_id):
+    def _check_exited_container(self, container, batch):
         """
         Inspects the logs of the given exited container and updates the database accordingly.
 
         :param container: The container to inspect
         :type container: Container
-        :param batch_id: The batch id, that was processed inside the given container
-        :type batch_id: str
+        :param batch: The batch to update according to the result of the container execution.
+        :type batch: dict
         """
-        bson_batch_id = ObjectId(batch_id)
+        bson_batch_id = batch['_id']
+        batch_id = str(bson_batch_id)
 
         try:
             stdout_logs = container.logs(stderr=False).decode('utf-8')
             stderr_logs = container.logs(stdout=False).decode('utf-8')
         except Exception as e:
             debug_info = 'Could not get logs of container: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, None)
+            batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
             return
 
         data = None
@@ -430,19 +467,19 @@ class ClientProxy:
             data = json.loads(stdout_logs)
         except json.JSONDecodeError as e:
             debug_info = 'CC-Agent data is not a valid json object: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, data)
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
             return
 
         try:
             jsonschema.validate(data, callback_schema)
         except jsonschema.ValidationError as e:
             debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, data)
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
             return
 
         if data['state'] == 'failed':
             debug_info = 'Batch failed.\nContainer stderr:\n{}\ndebug info:\n{}'.format(stderr_logs, data['debugInfo'])
-            batch_failure(self._mongo, batch_id, debug_info, data)
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
             return
 
         batch = self._mongo.db['batches'].find_one(
@@ -452,8 +489,11 @@ class ClientProxy:
         if not batch:
             raise ValueError('batch id "{}" not found.'.format(batch_id))
 
-        self._mongo.db['batches'].update(
-            {'_id': bson_batch_id},
+        self._mongo.db['batches'].update_one(
+            {
+                '_id': bson_batch_id,
+                'state': 'processing'
+            },
             {
                 '$set': {
                     'state': 'succeeded'
@@ -470,7 +510,38 @@ class ClientProxy:
             }
         )
 
-        container.remove()
+    def do_check_for_batches(self):
+        """
+        Triggers a check-for-batches cycle.
+        """
+        self._check_for_batches_event.set()
+
+    def do_check_exited_containers(self):
+        """
+        Triggers a check-exited-containers cycle.
+        """
+        self._check_exited_containers_event.set()
+
+    def do_inspect(self):
+        """
+        Triggers an inspection cycle.
+        """
+        self._inspection_event.set()
+
+    def _check_for_batches_loop(self):
+        """
+        Regularly calls _check_for_batches. Does wait before executing a new cycle, if this client proxy is offline.
+        """
+        while True:
+            self._online.wait()
+
+            self._check_for_batches_event.wait(timeout=CHECK_FOR_BATCHES_INTERVAL)
+            self._check_for_batches_event.clear()
+
+            try:
+                self._check_for_batches()
+            except TrusteeServiceError:
+                self.do_inspect()
 
     def _check_for_batches(self):
         """
@@ -481,6 +552,7 @@ class ClientProxy:
 
         :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
         requested keys
+        :raise ImageAuthenticationError: If the image authentication information is invalid.
         """
 
         # query for batches, that are in state 'scheduled' and are scheduled to this node
@@ -492,7 +564,7 @@ class ClientProxy:
         # list containing batches that are scheduled to this node and save them together with their experiment
         batches_with_experiments = []  # type: List[Tuple[Dict, Dict]]
 
-        # also create a dictionary, that maps docker image authentications to batches, which need this docker image
+        # dictionary, that maps docker image authentications to batches, which need this docker image
         image_to_batches = {}  # type: Dict[Tuple, List[Dict]]
 
         for batch in self._mongo.db['batches'].find(query):
@@ -520,7 +592,7 @@ class ClientProxy:
                 for batch in image_pull_result.depending_batches:
                     # fail the batch
                     batch_id = str(batch['_id'])
-                    self._pull_image_failure(image_pull_result.debug_info, batch_id)
+                    self._pull_image_failure(image_pull_result.debug_info, batch_id, batch['state'])
 
                     # remove batches that are failed
                     batches_with_experiments = list(filter(
@@ -612,8 +684,8 @@ class ClientProxy:
         (username, password) for authentication at the docker registry.
         :rtype: Tuple[str, None] or Tuple[str, Tuple[str, str]]
 
-        :raise Exception: If the given image authentication information is not complete (username and password are
-        mandatory)
+        :raise ImageAuthenticationError: If the given image authentication information is not complete
+        (username and password are mandatory)
         """
 
         image_url = ClientProxy._get_image_url(experiment)
@@ -622,7 +694,9 @@ class ClientProxy:
         if image_auth:
             for mandatory_key in ('username', 'password'):
                 if mandatory_key not in image_auth:
-                    raise Exception('Image authentication is given, but "{}" is missing'.format(mandatory_key))
+                    raise ImageAuthenticationError(
+                        'Image authentication is given, but "{}" is missing'.format(mandatory_key)
+                    )
 
             image_auth = (image_auth['username'], image_auth['password'])
         else:
@@ -644,13 +718,12 @@ class ClientProxy:
             self._run_batch_container(batch, experiment)
         except Exception as e:
             batch_id = str(batch['_id'])
-            self._run_batch_container_failure(batch_id, str(e))
+            self._run_batch_container_failure(batch_id, str(e), batch['state'])
 
     def _run_batch_container(self, batch, experiment):
         """
         Creates a docker container and runs the given batch, with settings described in the given batch and experiment.
-        Sets the state of the given batch to 'processing'. The created container is added to _started_container_batches
-        together with the batch id.
+        Sets the state of the given batch to 'processing'.
 
         :param batch: The batch to run
         :type batch: dict
@@ -742,8 +815,6 @@ class ClientProxy:
 
         container.start()
 
-        self._started_container_batches.put((container, batch_id))
-
     def _create_blue_batch(self, batch):
         """
         Creates a dictionary containing the data for a blue batch.
@@ -762,7 +833,14 @@ class ClientProxy:
         if response['state'] == 'failed':
             debug_info = 'Trustee service failed:\n{}'.format(response['debug_info'])
             disable_retry = response.get('disable_retry')
-            batch_failure(self._mongo, batch_id, debug_info, None, disable_retry_if_failed=disable_retry)
+            batch_failure(
+                self._mongo,
+                batch_id,
+                debug_info,
+                None,
+                batch['state'],
+                disable_retry_if_failed=disable_retry
+            )
             raise TrusteeServiceError(debug_info)
 
         batch_secrets = response['secrets']
@@ -825,12 +903,16 @@ class ClientProxy:
 
         return data_file
 
-    def _run_batch_container_failure(self, batch_id, debug_info):
-        batch_failure(self._mongo, batch_id, debug_info, None)
+    def _run_batch_container_failure(self, batch_id, debug_info, current_state):
+        batch_failure(self._mongo, batch_id, debug_info, None, current_state)
 
-    def _pull_image_failure(self, debug_info, batch_id):
-        batch_failure(self._mongo, batch_id, debug_info, None)
+    def _pull_image_failure(self, debug_info, batch_id, current_state):
+        batch_failure(self._mongo, batch_id, debug_info, None, current_state)
 
 
 class TrusteeServiceError(Exception):
+    pass
+
+
+class ImageAuthenticationError(Exception):
     pass

@@ -37,6 +37,7 @@ bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
 bind_socket = 'ipc://{}'.format(bind_socket_path)
 
 context = zmq.Context()
+# noinspection PyUnresolvedReferences
 controller = context.socket(zmq.PUSH)
 controller.connect(bind_socket)
 

@@ -43,7 +43,7 @@ def create_kdf(salt):
     )
 
 
-def batch_failure(mongo, batch_id, debug_info, ccagent, disable_retry_if_failed=False):
+def batch_failure(mongo, batch_id, debug_info, ccagent, current_state, disable_retry_if_failed=False):
     """
     Changes the db entry of the given batch to failed, if disable_retry_if_failed is set to True or if the maximal
     number of retries is exceeded. Otherwise the new state of the given batch is set to registered.
@@ -53,6 +53,9 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, disable_retry_if_failed=
     :type batch_id: str
     :param debug_info: The debug info to write to the db
     :param ccagent: The ccagent to write to the db
+    :param current_state: The expected current state of the batch to cancel. If this state does not match the batch from
+                          the db, the db entry is not updated.
+    :type current_state: str
     :param disable_retry_if_failed: If set to True, the batch is failed immediately, without giving another attempt
     """
     bson_id = ObjectId(batch_id)
@@ -83,8 +86,8 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, disable_retry_if_failed=
             new_state = 'failed'
             new_node = node_name
 
-    mongo.db['batches'].update(
-        {'_id': bson_id},
+    mongo.db['batches'].update_one(
+        {'_id': bson_id, 'state': current_state},
         {
             '$set': {
                 'state': new_state,

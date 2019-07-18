@@ -1,7 +1,6 @@
 import os
 import sys
-from threading import Thread
-from queue import Queue, Full
+from threading import Thread, Event
 from time import time, sleep
 from typing import Dict
 
@@ -56,10 +55,9 @@ class Scheduler:
 
         mongo.db['nodes'].drop()
 
-        self._scheduling_q = Queue(maxsize=1)
-        self._inspection_q = Queue(maxsize=1)
-        self._voiding_q = Queue(maxsize=1)
-        self._notification_q = Queue(maxsize=1)
+        self._scheduling_event = Event()
+        self._voiding_event = Event()
+        self._notification_event = Event()
 
         init_build_dir(conf)
 
@@ -70,56 +68,16 @@ class Scheduler:
         }  # type: Dict[str, ClientProxy]
 
         Thread(target=self._scheduling_loop).start()
-        Thread(target=self._inspection_loop).start()
         Thread(target=self._voiding_loop).start()
         Thread(target=self._notification_loop).start()
-        Thread(target=self._cron).start()
-
-    def _cron(self):
-        while True:
-            batch = self._mongo.db['batches'].find_one(
-                {'$or': [
-                    {'state': {'$nin': ['succeeded', 'failed', 'cancelled']}},
-                    {'protectedKeysVoided': False},
-                    {'notificationsSent': False}
-                ]},
-                {'_id': 1}
-            )
-            if batch:
-                self.schedule()
-
-            sleep(_CRON_INTERVAL)
 
     def schedule(self):
-        try:
-            self._scheduling_q.put_nowait(None)
-        except:
-            pass
-
-    def _inspection_loop(self):
-        while True:
-            self._inspection_q.get()
-
-            cursor = self._mongo.db['nodes'].find(
-                {'state': 'offline'},
-                {'nodeName': 1, 'state': 1}
-            )
-
-            threads = []
-
-            for node in cursor:
-                node_name = node['nodeName']
-                client_proxy = self._nodes[node_name]
-                t = Thread(target=client_proxy.inspect_offline_node)
-                t.start()
-                threads.append(t)
-
-            for t in threads:
-                t.join()
+        self._scheduling_event.set()
 
     def _notification_loop(self):
         while True:
-            self._notification_q.get()
+            self._notification_event.wait()
+            self._notification_event.clear()
 
             # batches
             cursor = self._mongo.db['batches'].find(
@@ -164,7 +122,8 @@ class Scheduler:
 
     def _voiding_loop(self):
         while True:
-            self._voiding_q.get()
+            self._voiding_event.wait()
+            self._voiding_event.clear()
 
             # batches
             cursor = self._mongo.db['batches'].find(
@@ -208,25 +167,14 @@ class Scheduler:
 
     def _scheduling_loop(self):
         while True:
-            self._scheduling_q.get()
-
-            # inspect offline nodes
-            try:
-                self._inspection_q.put_nowait(None)
-            except Full:
-                pass
+            self._scheduling_event.wait(timeout=_CRON_INTERVAL)
+            self._scheduling_event.clear()
 
             # void protected keys
-            try:
-                self._voiding_q.put_nowait(None)
-            except Full:
-                pass
+            self._voiding_event.set()
 
             # send notifications
-            try:
-                self._notification_q.put_nowait(None)
-            except Full:
-                pass
+            self._notification_event.set()
 
             # inspect trustee
             response = self._trustee_client.inspect()
@@ -238,47 +186,23 @@ class Scheduler:
                 sleep(_CRON_INTERVAL)
                 continue
 
-            self._clean_up_client_proxies()
+            self._client_proxies_check_exited_containers()
             self._schedule_batches()
             self._client_proxies_check_for_batches()
 
-    def _clean_up_client_proxies(self):
+    def _client_proxies_check_exited_containers(self):
         """
-        Puts a 'clean_up' action in every ClientProxy
-        :return:
+        Triggers every client proxy to check for exited containers and cancelled batches.
         """
-        cluster_nodes = self._get_cluster_state()
-        for cluster_node in cluster_nodes:
-            node_name = cluster_node.node_name
-            client_proxy = self._nodes[node_name]
-            client_proxy.put_action({'action': 'clean_up'})
+        for client_proxy in self._nodes.values():
+            client_proxy.do_check_exited_containers()
 
     def _client_proxies_check_for_batches(self):
         """
-        Puts a 'check_for_batches' action in every ClientProxy. If this is not possible all batches, which are scheduled
-        to this client proxy are set to failed or back to registered.
+        Triggers every client proxy to check for new batches possibly scheduled to their nodes.
         """
-        for node_name, client_proxy in self._nodes.items():
-            check_for_batches_data = {
-                'action': 'check_for_batches'
-            }
-
-            if not client_proxy.put_action(check_for_batches_data):
-                batches_of_node = self._mongo.db['batches'].find(
-                    {'node': node_name, 'state': 'scheduled'},
-                    {'_id': 1}
-                )
-                for batch_of_node in batches_of_node:
-                    batch_id = str(batch_of_node['_id'])
-                    debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
-                        node_name
-                    )
-                    batch_failure(
-                        self._mongo,
-                        batch_id,
-                        debug_info,
-                        None
-                    )
+        for client_proxy in self._nodes.values():
+            client_proxy.do_check_for_batches()
 
     @staticmethod
     def _get_busy_gpu_ids(batches, node_name):
@@ -337,6 +261,7 @@ class Scheduler:
     def _get_cluster_state(self):
         """
         Returns a list of complete nodes, which are currently present in the cluster.
+        :rtype: List[CompleteNode]
         """
         cursor = self._mongo.db['nodes'].find(
             {},
@@ -398,6 +323,7 @@ class Scheduler:
         Returns True if the nodes hardware is sufficient for the experiment
 
         :param node: The node to test
+        :type node: CompleteNode
         :param experiment: A dictionary containing hardware requirements for the experiment
         :return: True, if the nodes hardware is sufficient for the experiment, otherwise False
         """
@@ -424,6 +350,7 @@ class Scheduler:
         Returns True if the node could be sufficient for the experiment, even if the node does not have
         sufficient hardware at the moment (because of running batches).
         :param node: The node to check
+        :type node: CompleteNode
         :param experiment: The experiment for which the node is sufficient or not.
         :return: True, if the node is possibly sufficient otherwise False
         """
@@ -457,6 +384,7 @@ class Scheduler:
         """
         Returns the node, that fits best for the given experiment. If no node could be found returns None
         :param nodes: The nodes, that are available for this experiment.
+        :type nodes: List[CompleteNode]
         :param experiment: The description of the experiment
         :return: The node that fits best for the given experiment. If no node fits at the moment None is returned.
         :rtype: CompleteNode
@@ -515,32 +443,11 @@ class Scheduler:
                 cluster_nodes = self._get_cluster_state()
                 scheduled_nodes.append((next_batch['_id'], node_name))
 
-        # ClientProxies clean up
-        for cluster_node in cluster_nodes:
-            node_name = cluster_node.node_name
-            client_proxy = self._nodes[node_name]
-
-            if not client_proxy.put_action({'action': 'clean_up'}):
-                continue
-
         # inform ClientProxies about new batches
         for batch_id, node_name in scheduled_nodes:
             client_proxy = self._nodes[node_name]
-            check_for_batches_data = {
-                'action': 'check_for_batches'
-            }
 
-            if not client_proxy.put_action(check_for_batches_data):
-                debug_info = 'Could not reach docker client proxy for node "{}" during scheduling.'.format(
-                    node_name
-                )
-                batch_failure(
-                    self._mongo,
-                    batch_id,
-                    debug_info,
-                    None,
-                    self._conf
-                )
+            client_proxy.do_check_for_batches()
 
     def _get_number_of_batches_of_experiment(self, experiment_id, batch_count_cache):
         """
@@ -580,6 +487,7 @@ class Scheduler:
 
         :param next_batch: The batch to schedule.
         :param nodes: The nodes on which the batch should be scheduled.
+        :type nodes: List[CompleteNode]
         :param batch_count_cache: A dictionary mapping experiment ids to the number of batches of this experiment, which
                                   in state processing or scheduled. This dictionary is allowed to overestimate the
                                   number of batches.
@@ -599,6 +507,7 @@ class Scheduler:
                 batch_id,
                 repr(e),
                 None,
+                next_batch['state'],
                 disable_retry_if_failed=True
             )
             return None
@@ -618,7 +527,14 @@ class Scheduler:
         if not Scheduler._check_nodes_possibly_sufficient(nodes, experiment):
             debug_info = 'There are no nodes configured that are possibly sufficient for experiment "{}"' \
                 .format(next_batch['experimentId'])
-            batch_failure(self._mongo, batch_id, debug_info, None, disable_retry_if_failed=True)
+            batch_failure(
+                self._mongo,
+                batch_id,
+                debug_info,
+                None,
+                next_batch['state'],
+                disable_retry_if_failed=True
+            )
             return None
 
         # select node
@@ -656,13 +572,14 @@ class Scheduler:
                 batch_id,
                 debug_info,
                 None,
+                next_batch['state'],
                 disable_retry_if_failed=True
             )
             return None
 
         # update batch data
         self._mongo.db['batches'].update_one(
-            {'_id': next_batch['_id']},
+            {'_id': next_batch['_id'], 'state': next_batch['state']},
             {
                 '$set': {
                     'state': 'scheduled',
@@ -739,7 +656,7 @@ class Scheduler:
         cursor = self._mongo.db['batches'].aggregate([
             {'$match': {'state': 'registered'}},
             {'$sort': {'registrationTime': 1}},
-            {'$project': {'experimentId': 1, 'inputs': 1, 'outputs': 1}}
+            {'$project': {'experimentId': 1, 'inputs': 1, 'outputs': 1, 'state': 1}}
         ])
         for b in cursor:
             yield b
