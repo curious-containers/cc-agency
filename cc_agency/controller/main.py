@@ -1,8 +1,10 @@
 import os
 from argparse import ArgumentParser
 import atexit
+from pprint import pprint
 
 import zmq
+import pymongo
 
 from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
@@ -29,9 +31,21 @@ def main():
     # Singletons
     conf = Conf(args.conf_file)
     mongo = Mongo(conf)
+
+    # MongoDB indexes
+    mongo.db['batches'].create_index([('state', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('protectedKeysVoided', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('notificationsSent', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('experimentId', pymongo.ASCENDING)])
+
+    print('MongoDB Indexes:')
+    pprint(list(mongo.db['experiments'].list_indexes()) + list(mongo.db['batches'].list_indexes()))
+
+    # Singletons
     trustee_client = TrusteeClient(conf)
     scheduler = Scheduler(conf, mongo, trustee_client)
 
+    # ZeroMQ socket
     bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
     bind_socket_dir, _ = os.path.split(bind_socket_path)
 

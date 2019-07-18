@@ -127,11 +127,6 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         if 'ram' not in data['container']['settings']:
             raise BadRequest('CC-Agency requires \'ram\' to be defined in the container settings.')
 
-        if (data['container']['engine'] == 'nvidia-docker') and ('gpus' not in data['container']['settings']):
-            raise BadRequest(
-                'CC-Agency with \'nvidia-docker\' engine requires \'gpus\' to be defined in the container settings.'
-            )
-
         try:
             engine_validation(data, 'execution', ['ccagency'], optional=True)
             normalize_keys(data)

@@ -12,6 +12,7 @@ import docker
 import jsonschema
 from docker.models.containers import Container
 from docker.tls import TLSConfig
+from docker.types import Ulimit
 import docker.errors
 from bson.objectid import ObjectId
 import bson.errors
@@ -25,7 +26,8 @@ from cc_core.commons.gpu_info import set_nvidia_environment_variables
 from cc_agency.commons.helper import batch_failure, calculate_agency_id
 from cc_core.commons.red_to_blue import convert_red_to_blue
 
-CURL_IMAGE = 'docker.io/buildpack-deps:bionic-curl'
+INSPECTION_IMAGE = 'docker.io/busybox:latest'
+NOFILE_LIMIT = 4096
 BLUE_AGENT_FILE_DIR = 'cc'
 BLUE_AGENT_CONTAINER_NAME = 'blue_agent.py'
 BLUE_FILE_CONTAINER_NAME = 'blue_file.json'
@@ -336,7 +338,7 @@ class ClientProxy:
 
         try:
             self._client.containers.run(
-                CURL_IMAGE,
+                INSPECTION_IMAGE,
                 command,
                 user='1000:1000',
                 remove=True,
@@ -792,6 +794,14 @@ class ClientProxy:
         if existing_container is not None:
             existing_container.remove(force=True)
 
+        ulimits = [
+            docker.types.Ulimit(
+                name='nofile',
+                soft=NOFILE_LIMIT,
+                hard=NOFILE_LIMIT
+            )
+        ]
+
         container = self._client.containers.create(
             image,
             command,
@@ -805,7 +815,8 @@ class ClientProxy:
             network=self._network,
             devices=devices,
             cap_add=capabilities,
-            security_opt=security_opt
+            security_opt=security_opt,
+            ulimits=ulimits
         )  # type: Container
 
         # copy blue agent and blue file to container
