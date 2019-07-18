@@ -132,11 +132,13 @@ class ClientProxy:
     """
     NUM_WORKERS = 4
 
-    def __init__(self, node_name, conf, mongo, trustee_client):
+    def __init__(self, node_name, conf, mongo, trustee_client, scheduling_event):
         self._node_name = node_name
         self._conf = conf
         self._mongo = mongo
         self._trustee_client = trustee_client
+
+        self._scheduling_event = scheduling_event
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
         self._base_url = node_conf['base_url']
@@ -319,11 +321,15 @@ class ClientProxy:
             },
             {'_id': 1}
         )
+        resources_freed = False
         for batch in cursor:
             batch_id = str(batch['_id'])
 
             c = running_containers[batch_id]
             c.remove(force=True)
+            resources_freed = True
+
+        return resources_freed
 
     def _can_execute_container(self):
         """
@@ -410,6 +416,9 @@ class ClientProxy:
         - succeeded: If the batch execution was successful
         - failed: If the batch execution has failed
 
+        :return: True if a exited container was found, otherwise False
+        :rtype: bool
+
         :raise docker.errors.DockerException:
         """
         exited_containers = self._batch_containers('exited')  # type: Dict[str, Container]
@@ -418,6 +427,7 @@ class ClientProxy:
             {'_id': {'$in': [ObjectId(_id) for _id in exited_containers]}},
             {'state': 1}
         )
+        resources_freed = False
         for batch in batch_cursor:
             batch_id = str(batch['_id'])
 
@@ -426,6 +436,10 @@ class ClientProxy:
             self._check_exited_container(exited_container, batch)
 
             exited_container.remove()
+
+            resources_freed = True
+
+        return resources_freed
 
     def _check_exited_containers_loop(self):
         """
@@ -439,8 +453,11 @@ class ClientProxy:
             self._check_exited_containers_event.clear()
 
             try:
-                self._check_exited_containers()
-                self._remove_cancelled_containers()
+                resources_freed = self._check_exited_containers()
+                resources_freed = self._remove_cancelled_containers() or resources_freed
+
+                if resources_freed:
+                    self._scheduling_event.set()
             except docker.errors.DockerException:
                 self.do_inspect()
 
