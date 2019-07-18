@@ -1,6 +1,7 @@
 import os
 from argparse import ArgumentParser
 import atexit
+from pprint import pprint
 
 import zmq
 import pymongo
@@ -31,14 +32,23 @@ def main():
     conf = Conf(args.conf_file)
     mongo = Mongo(conf)
 
-    print('Create MongoDB indexes for batches collection:')
-    print(mongo.db['batches'].create_index([('node', pymongo.HASHED)]))
-    print(mongo.db['batches'].create_index([('state', pymongo.HASHED)]))
-    print(mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)]))
-
     trustee_client = TrusteeClient(conf)
     scheduler = Scheduler(conf, mongo, trustee_client)
 
+    # MongoDB indexes
+    mongo.db['experiments'].create_index([('username', pymongo.HASHED)])
+    mongo.db['experiments'].create_index([('registrationTime', pymongo.DESCENDING)])
+
+    mongo.db['batches'].create_index([('username', pymongo.HASHED)])
+    mongo.db['batches'].create_index([('node', pymongo.HASHED)])
+    mongo.db['batches'].create_index([('state', pymongo.HASHED)])
+    mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)])
+    mongo.db['batches'].create_index([('registrationTime', pymongo.DESCENDING)])
+
+    pprint(mongo.db['experiments'].list_indexes())
+    pprint(mongo.db['batches'].list_indexes())
+
+    # ZeroMQ socket
     bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
     bind_socket_dir, _ = os.path.split(bind_socket_path)
 
