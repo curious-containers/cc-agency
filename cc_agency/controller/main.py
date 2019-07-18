@@ -42,9 +42,8 @@ def main():
     mongo.db['batches'].create_index([('registrationTime', pymongo.ASCENDING)])
     mongo.db['batches'].create_index([('registrationTime', pymongo.DESCENDING)])
 
-    print('MongoDB Indexes')
-    pprint(list(mongo.db['experiments'].list_indexes()))
-    pprint(list(mongo.db['batches'].list_indexes()))
+    print('MongoDB Indexes:')
+    pprint(list(mongo.db['experiments'].list_indexes()) + list(mongo.db['batches'].list_indexes()))
 
     # Singletons
     trustee_client = TrusteeClient(conf)
