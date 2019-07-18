@@ -382,7 +382,7 @@ class ClientProxy:
     def _inspection_loop(self):
         """
         Regularly inspects the connection the docker daemon by running a docker container. If an error was found, clears
-        the "running-flag" and puts in a error token in the inspection queue.
+        the "online-flag" and puts in a error token in the inspection queue.
 
         Waits for errors inside the inspection-queue. If an error token was found inside the inspection-queue, handles
         this error. Otherwise performs a routine check of the docker client, after a given timeout.
