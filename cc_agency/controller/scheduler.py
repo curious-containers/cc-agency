@@ -573,7 +573,7 @@ class Scheduler:
             return None
 
         # update batch data
-        self._mongo.db['batches'].update_one(
+        update_result = self._mongo.db['batches'].update_one(
             {'_id': next_batch['_id'], 'state': next_batch['state']},
             {
                 '$set': {
@@ -597,12 +597,15 @@ class Scheduler:
             }
         )
 
-        # The state of the scheduled batch switched from 'registered' to 'scheduled', so increase the batch_count.
-        # batch_count_cache always contains experiment_id, because _get_number_of_batches_of_experiment()
-        # always inserts the given experiment_id
-        batch_count_cache[experiment_id] += 1
+        if update_result.modified_count == 1:
+            # The state of the scheduled batch switched from 'registered' to 'scheduled', so increase the batch_count.
+            # batch_count_cache always contains experiment_id, because _get_number_of_batches_of_experiment()
+            # always inserts the given experiment_id
+            batch_count_cache[experiment_id] += 1
 
-        return selected_node.node_name
+            return selected_node.node_name
+        else:
+            return None
 
     def _get_experiment_of_batch(self, experiment_id):
         """
