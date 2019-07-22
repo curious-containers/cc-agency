@@ -17,7 +17,7 @@ import docker.errors
 from bson.objectid import ObjectId
 import bson.errors
 
-from cc_agency.commons.schemas.callback import callback_schema
+from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys
 from cc_core.commons.engines import engine_to_runtime
@@ -488,7 +488,7 @@ class ClientProxy:
             return
 
         try:
-            jsonschema.validate(data, callback_schema)
+            jsonschema.validate(data, agent_result_schema)
         except jsonschema.ValidationError as e:
             debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
             batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
