@@ -23,7 +23,7 @@ from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experimen
 from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
-from cc_agency.commons.helper import batch_failure, calculate_agency_id
+from cc_agency.commons.helper import batch_failure
 from cc_core.commons.red_to_blue import convert_red_to_blue
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
@@ -39,7 +39,7 @@ CHECK_FOR_BATCHES_INTERVAL = 20
 class ImagePullResult:
     def __init__(self, image_url, auth, successful, debug_info, depending_batches):
         """
-        Creates a new DockerImagePull object
+        Creates a new DockerImagePull object.
 
         :param image_url: The url of the image to pull
         :type image_url: str
@@ -148,9 +148,6 @@ class ClientProxy:
 
         self._environment = node_conf.get('environment')
         self._network = node_conf.get('network')
-
-        # using hash of external url to distinguish between volume names created by different agency installations
-        self._agency_id = calculate_agency_id(conf)
 
         # create db entry for this node
         node = {

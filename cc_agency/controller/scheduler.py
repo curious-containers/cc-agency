@@ -11,8 +11,7 @@ from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements
 from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
 from cc_agency.controller.docker import ClientProxy, TrusteeServiceError
-from cc_agency.commons.helper import calculate_agency_id, batch_failure
-from cc_agency.commons.build_dir import init_build_dir
+from cc_agency.commons.helper import batch_failure
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
 from cc_agency.commons.secrets import get_batch_secret_keys
 
@@ -51,15 +50,11 @@ class Scheduler:
         self._mongo = mongo
         self._trustee_client = trustee_client
 
-        self._agency_id = calculate_agency_id(conf)
-
         mongo.db['nodes'].drop()
 
         self._scheduling_event = Event()
         self._voiding_event = Event()
         self._notification_event = Event()
-
-        init_build_dir(conf)
 
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo, trustee_client, self._scheduling_event)

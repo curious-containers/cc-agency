@@ -7,7 +7,6 @@ conf_schema = {
         'broker': {
             'type': 'object',
             'properties': {
-                'external_url': {'type': 'string'},
                 'auth': {
                     'type': 'object',
                     'properties': {
@@ -20,7 +19,7 @@ conf_schema = {
                 }
             },
             'additionalProperties': False,
-            'required': ['external_url', 'auth']
+            'required': ['auth']
         },
         'controller': {
             'type': 'object',
