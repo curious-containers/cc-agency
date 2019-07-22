@@ -334,6 +334,7 @@ class ClientProxy:
     def _can_execute_container(self):
         """
         Tries to execute a docker container using the docker client.
+
         :return: A tuple (successful, (ram, cpus)/error)
                  successful: True, if the docker container could be executed, otherwise False
                  (ram, cpus)/error: In case of success a tuple containing (ram, cpus), in case of failure the error
@@ -636,6 +637,7 @@ class ClientProxy:
     def _get_experiment_with_secrets(self, experiment_id):
         """
         Returns the experiment of the given experiment_id with filled secrets.
+
         :param experiment_id: The experiment id to resolve.
         :type experiment_id: ObjectId
         :return: The experiment as dictionary with filled template values.
@@ -653,6 +655,7 @@ class ClientProxy:
     def _fill_experiment_secret_keys(self, experiment):
         """
         Returns the given experiment with filled template keys and values.
+
         :param experiment: The experiment to complete.
         :return: Returns the given experiment with filled template keys and values.
         :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
@@ -682,6 +685,7 @@ class ClientProxy:
     def _get_image_url(experiment):
         """
         Gets the url of the docker image for the given experiment
+
         :param experiment: The experiment whose docker image url is returned
         :type experiment: Dict
         :return: The url of the docker image for the given experiment
@@ -727,6 +731,7 @@ class ClientProxy:
         """
         Runs the given batch by calling _run_batch_container(), but handles exceptions, by calling
         _run_batch_container_failure().
+
         :param batch: The batch to run
         :type batch: dict
         :param experiment: The experiment of this batch
@@ -750,13 +755,58 @@ class ClientProxy:
         :type experiment: dict
         """
         batch_id = str(batch['_id'])
-        runtime = engine_to_runtime(experiment['container']['engine'])
+
+        update_result = self._mongo.db['batches'].update_one(
+            {
+                '_id': ObjectId(batch_id),
+                'state': 'scheduled'
+            },
+            {
+                '$set': {
+                    'state': 'processing',
+                },
+                '$push': {
+                    'history': {
+                        'state': 'processing',
+                        'time': time.time(),
+                        'debugInfo': None,
+                        'node': self._node_name,
+                        'ccagent': None
+                    }
+                }
+            }
+        )
+
+        # only run the docker container, if the batch was successfully updated
+        if update_result.modified_count == 1:
+            self._run_container(batch, experiment)
+
+    def _run_container(self, batch, experiment):
+        """
+        Runs a docker container for the given batch. Uses the following procedure:
+
+        - Collects all arguments for the docker container execution
+        - Removes old containers with the same name
+        - Creates the docker container with the collected arguments
+        - Creates an archive containing the blue_agent and the blue_file of this batch and copies this archive into the
+          container
+        - Starts the container
+
+        :param batch: The batch to run inside the container
+        :type batch: Dict[str, Any]
+        :param experiment: The experiment of the given batch
+        :type experiment: Dict[str, Any]
+        """
+        batch_id = str(batch['_id'])
 
         # set nvidia gpu environment
-        gpus = batch['usedGPUs']
+        runtime = engine_to_runtime(experiment['container']['engine'])
+
         environment = {}
         if self._environment:
             environment = self._environment.copy()
+
+        gpus = batch['usedGPUs']
         if gpus:
             set_nvidia_environment_variables(environment, gpus)
 
@@ -783,34 +833,10 @@ class ClientProxy:
             container_blue_file_path
         ]
 
-        command = ' '.join(command)
-
         ram = experiment['container']['settings']['ram']
         mem_limit = '{}m'.format(ram)
 
-        self._mongo.db['batches'].update_one(
-            {'_id': ObjectId(batch_id)},
-            {
-                '$set': {
-                    'state': 'processing',
-                },
-                '$push': {
-                    'history': {
-                        'state': 'processing',
-                        'time': time.time(),
-                        'debugInfo': None,
-                        'node': self._node_name,
-                        'ccagent': None
-                    }
-                }
-            }
-        )
-
-        # remove container if it exists from earlier attempt
-        existing_container = self._batch_containers(None).get(batch_id)
-        if existing_container is not None:
-            existing_container.remove(force=True)
-
+        # set ulimits
         ulimits = [
             docker.types.Ulimit(
                 name='nofile',
@@ -818,6 +844,11 @@ class ClientProxy:
                 hard=NOFILE_LIMIT
             )
         ]
+
+        # remove container if it exists from earlier attempt
+        existing_container = self._batch_containers(None).get(batch_id)
+        if existing_container is not None:
+            existing_container.remove(force=True)
 
         container = self._client.containers.create(
             image,
