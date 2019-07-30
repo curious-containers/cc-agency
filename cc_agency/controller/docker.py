@@ -2,6 +2,7 @@ import io
 import json
 import os
 import tarfile
+import stat
 from threading import Thread, Event
 import concurrent.futures
 import time
@@ -24,7 +25,7 @@ from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 from cc_agency.commons.helper import batch_failure
-from cc_core.commons.red_to_blue import convert_red_to_blue
+from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTDIR
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
 NOFILE_LIMIT = 4096
@@ -34,6 +35,7 @@ BLUE_FILE_CONTAINER_NAME = 'blue_file.json'
 CHECK_EXITED_CONTAINERS_INTERVAL = 1.0
 OFFLINE_INSPECTION_INTERVAL = 10
 CHECK_FOR_BATCHES_INTERVAL = 20
+OUTPUTS_DIRECTORY_NAME = 'outputs'
 
 
 class ImagePullResult:
@@ -852,6 +854,7 @@ class ClientProxy:
             command,
             name=batch_id,
             user='1000:1000',
+            working_dir=CONTAINER_OUTDIR,
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
@@ -924,9 +927,12 @@ class ClientProxy:
 
     def _create_batch_archive(self, batch, directory):
         """
-        Creates a tar archive. This archive contains the blue agent and a blue file. The blue file is filled with the
-        given blue data. The blue agent and the blue file are stored inside the given directory. The tar archive and all
-        files contained in this archive are in memory and are never stored in the local filesystem.
+        Creates a tar archive.
+        This archive contains the blue agent, a blue file and the outputs-directory.
+        The blue file is filled with the blue data from the given batch.
+        The blue agent and the blue file are stored inside the given directory.
+        The outputs-directory is an empty directory, with name 'outputs'
+        The tar archive and the blue file are always in memory and never stored on the local filesystem.
 
         :param batch: The data to put into the blue file of the returned archive
         :type batch: dict
@@ -942,16 +948,26 @@ class ClientProxy:
         agent_archive_name = os.path.join(directory, BLUE_AGENT_CONTAINER_NAME)
         tar_file.add(_get_blue_agent_host_path(), arcname=agent_archive_name, recursive=False)
 
-        # add blue file
+        # add blue file. See https://bugs.python.org/issue22208 for more information
         blue_batch_name = os.path.join(directory, BLUE_FILE_CONTAINER_NAME)
         blue_batch = self._create_blue_batch(batch)
         blue_batch_content = json.dumps(blue_batch).encode('utf-8')
 
-        # see https://bugs.python.org/issue22208 for more information
         blue_batch_tarinfo = tarfile.TarInfo(blue_batch_name)
         blue_batch_tarinfo.size = len(blue_batch_content)
 
         tar_file.addfile(blue_batch_tarinfo, io.BytesIO(blue_batch_content))
+
+        # add outputs directory
+        output_directory_name = os.path.join(directory, OUTPUTS_DIRECTORY_NAME)
+        output_directory_tarinfo = tarfile.TarInfo(output_directory_name)
+        output_directory_tarinfo.type = tarfile.DIRTYPE
+        output_directory_tarinfo.uid = 1000
+        output_directory_tarinfo.gid = 1000
+        output_directory_tarinfo.uname = 'cc'
+        output_directory_tarinfo.gname = 'cc'
+        output_directory_tarinfo.mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+        tar_file.addfile(output_directory_tarinfo)
 
         # close file
         tar_file.close()
