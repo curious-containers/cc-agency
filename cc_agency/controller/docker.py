@@ -485,7 +485,7 @@ class ClientProxy:
         try:
             data = json.loads(stdout_logs)
         except json.JSONDecodeError as e:
-            debug_info = 'CC-Agent data is not a valid json object: {}'.format(str(e))
+            debug_info = 'CC-Agent data is not a valid json object: {}\n\nstdout was:\n{}'.format(str(e), stdout_logs)
             batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
             return
 
