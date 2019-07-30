@@ -25,17 +25,14 @@ from cc_core.commons.engines import engine_to_runtime
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 from cc_agency.commons.helper import batch_failure
-from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTDIR
+from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTDIR, CONTAINER_AGENT_PATH, \
+    CONTAINER_BLUE_FILE_PATH
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
 NOFILE_LIMIT = 4096
-BLUE_AGENT_FILE_DIR = 'cc'
-BLUE_AGENT_CONTAINER_NAME = 'blue_agent.py'
-BLUE_FILE_CONTAINER_NAME = 'blue_file.json'
 CHECK_EXITED_CONTAINERS_INTERVAL = 1.0
 OFFLINE_INSPECTION_INTERVAL = 10
 CHECK_FOR_BATCHES_INTERVAL = 20
-OUTPUTS_DIRECTORY_NAME = 'outputs'
 
 
 class ImagePullResult:
@@ -821,15 +818,12 @@ class ClientProxy:
         # set image
         image = experiment['container']['settings']['image']['url']
 
-        container_blue_agent_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_AGENT_CONTAINER_NAME)
-        container_blue_file_path = os.path.join(BLUE_AGENT_FILE_DIR, BLUE_FILE_CONTAINER_NAME)
-
         command = [
             'python3',
-            container_blue_agent_path,
+            CONTAINER_AGENT_PATH,
             '--outputs',
             '--debug',
-            container_blue_file_path
+            CONTAINER_BLUE_FILE_PATH
         ]
 
         ram = experiment['container']['settings']['ram']
@@ -868,7 +862,7 @@ class ClientProxy:
         )  # type: Container
 
         # copy blue agent and blue file to container
-        tar_archive = self._create_batch_archive(batch, BLUE_AGENT_FILE_DIR)
+        tar_archive = self._create_batch_archive(batch)
         container.put_archive('/', tar_archive)
         tar_archive.close()
 
@@ -925,19 +919,22 @@ class ClientProxy:
 
         return blue_batches[0]
 
-    def _create_batch_archive(self, batch, directory):
+    def _create_batch_archive(self, batch):
         """
         Creates a tar archive.
         This archive contains the blue agent, a blue file and the outputs-directory.
         The blue file is filled with the blue data from the given batch.
-        The blue agent and the blue file are stored inside the given directory.
         The outputs-directory is an empty directory, with name 'outputs'
         The tar archive and the blue file are always in memory and never stored on the local filesystem.
 
+        The resulting archive is:
+        /cc
+        |--/blue_agent.py
+        |--/blue_file.json
+        |--/outputs/
+
         :param batch: The data to put into the blue file of the returned archive
         :type batch: dict
-        :param directory: Inside the archive the blue agent and the blue batch is located under the given directory
-        :type directory: str
         :return: A tar archive containing the blue agent and the given blue batch
         :rtype: io.BytesIO or bytes
         """
@@ -945,22 +942,19 @@ class ClientProxy:
         tar_file = tarfile.open(mode='w', fileobj=data_file)
 
         # add blue agent
-        agent_archive_name = os.path.join(directory, BLUE_AGENT_CONTAINER_NAME)
-        tar_file.add(_get_blue_agent_host_path(), arcname=agent_archive_name, recursive=False)
+        tar_file.add(_get_blue_agent_host_path(), arcname=CONTAINER_AGENT_PATH, recursive=False)
 
         # add blue file. See https://bugs.python.org/issue22208 for more information
-        blue_batch_name = os.path.join(directory, BLUE_FILE_CONTAINER_NAME)
         blue_batch = self._create_blue_batch(batch)
         blue_batch_content = json.dumps(blue_batch).encode('utf-8')
 
-        blue_batch_tarinfo = tarfile.TarInfo(blue_batch_name)
+        blue_batch_tarinfo = tarfile.TarInfo(CONTAINER_BLUE_FILE_PATH)
         blue_batch_tarinfo.size = len(blue_batch_content)
 
         tar_file.addfile(blue_batch_tarinfo, io.BytesIO(blue_batch_content))
 
         # add outputs directory
-        output_directory_name = os.path.join(directory, OUTPUTS_DIRECTORY_NAME)
-        output_directory_tarinfo = tarfile.TarInfo(output_directory_name)
+        output_directory_tarinfo = tarfile.TarInfo(CONTAINER_OUTDIR)
         output_directory_tarinfo.type = tarfile.DIRTYPE
         output_directory_tarinfo.uid = 1000
         output_directory_tarinfo.gid = 1000
