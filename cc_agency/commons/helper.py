@@ -103,7 +103,7 @@ def batch_failure(
                     'debugInfo': debug_info,
                     'node': new_node,
                     'ccagent': ccagent,
-                    'docker_stats': docker_stats
+                    'dockerStats': docker_stats
                 }
             }
         }

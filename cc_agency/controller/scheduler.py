@@ -589,7 +589,7 @@ class Scheduler:
                         'debugInfo': None,
                         'node': selected_node.node_name,
                         'ccagent': None,
-                        'docker_stats': None
+                        'dockerStats': None
                     }
                 },
                 '$inc': {

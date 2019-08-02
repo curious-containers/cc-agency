@@ -68,7 +68,7 @@ def _prepare_red_data(data, user):
                 'debugInfo': None,
                 'node': None,
                 'ccagent': None,
-                'docker_stats': None
+                'dockerStats': None
             }],
             'attempts': 0,
             'inputs': rb['inputs'],
@@ -188,7 +188,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
                         'debugInfo': None,
                         'node': None,
                         'ccagent': None,
-                        'docker_stats': None
+                        'dockerStats': None
                     }
                 }
             })
