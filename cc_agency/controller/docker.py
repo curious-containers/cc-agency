@@ -473,8 +473,9 @@ class ClientProxy:
         try:
             stdout_logs = container.logs(stderr=False).decode('utf-8')
             stderr_logs = container.logs(stdout=False).decode('utf-8')
+            docker_stats = container.stats(stream=False)
         except Exception as e:
-            debug_info = 'Could not get logs of container: {}'.format(str(e))
+            debug_info = 'Could not get logs or stats of container: {}'.format(str(e))
             batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
             return
 
@@ -520,7 +521,8 @@ class ClientProxy:
                         'time': time.time(),
                         'debugInfo': None,
                         'node': batch['node'],
-                        'ccagent': data
+                        'ccagent': data,
+                        'docker_stats': docker_stats
                     }
                 }
             }
@@ -767,7 +769,8 @@ class ClientProxy:
                         'time': time.time(),
                         'debugInfo': None,
                         'node': self._node_name,
-                        'ccagent': None
+                        'ccagent': None,
+                        'docker_stats': None
                     }
                 }
             }

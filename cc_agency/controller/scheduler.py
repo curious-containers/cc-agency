@@ -588,7 +588,8 @@ class Scheduler:
                         'time': time(),
                         'debugInfo': None,
                         'node': selected_node.node_name,
-                        'ccagent': None
+                        'ccagent': None,
+                        'docker_stats': None
                     }
                 },
                 '$inc': {
