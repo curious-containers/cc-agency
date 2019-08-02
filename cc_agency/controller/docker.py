@@ -484,19 +484,19 @@ class ClientProxy:
             data = json.loads(stdout_logs)
         except json.JSONDecodeError as e:
             debug_info = 'CC-Agent data is not a valid json object: {}\n\nstdout was:\n{}'.format(str(e), stdout_logs)
-            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
             return
 
         try:
             jsonschema.validate(data, agent_result_schema)
         except jsonschema.ValidationError as e:
             debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
-            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
             return
 
         if data['state'] == 'failed':
             debug_info = 'Batch failed.\nContainer stderr:\n{}\ndebug info:\n{}'.format(stderr_logs, data['debugInfo'])
-            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'])
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
             return
 
         batch = self._mongo.db['batches'].find_one(

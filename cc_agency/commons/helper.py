@@ -35,7 +35,15 @@ def create_kdf(salt):
     )
 
 
-def batch_failure(mongo, batch_id, debug_info, ccagent, current_state, disable_retry_if_failed=False):
+def batch_failure(
+        mongo,
+        batch_id,
+        debug_info,
+        ccagent,
+        current_state,
+        disable_retry_if_failed=False,
+        docker_stats=None
+):
     """
     Changes the db entry of the given batch to failed, if disable_retry_if_failed is set to True or if the maximal
     number of retries is exceeded. Otherwise the new state of the given batch is set to registered.
@@ -49,6 +57,9 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, current_state, disable_r
                           the db, the db entry is not updated.
     :type current_state: str
     :param disable_retry_if_failed: If set to True, the batch is failed immediately, without giving another attempt
+    :param docker_stats: The optional stats of the docker container, that will written under the "docker_stats" key in
+                         the history of this batch
+    :type docker_stats: dict
     """
     bson_id = ObjectId(batch_id)
 
@@ -91,7 +102,8 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, current_state, disable_r
                     'time': timestamp,
                     'debugInfo': debug_info,
                     'node': new_node,
-                    'ccagent': ccagent
+                    'ccagent': ccagent,
+                    'docker_stats': docker_stats
                 }
             }
         }
