@@ -22,11 +22,12 @@ from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys
 from cc_core.commons.engines import engine_to_runtime
+from cc_core.commons.files import create_directory_tarinfo
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
 from cc_agency.commons.helper import batch_failure
-from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTDIR, CONTAINER_AGENT_PATH, \
-    CONTAINER_BLUE_FILE_PATH
+from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DIR, CONTAINER_AGENT_PATH, \
+    CONTAINER_BLUE_FILE_PATH, CONTAINER_INPUT_DIR
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
 NOFILE_LIMIT = 4096
@@ -851,7 +852,7 @@ class ClientProxy:
             command,
             name=batch_id,
             user='1000:1000',
-            working_dir=CONTAINER_OUTDIR,
+            working_dir=CONTAINER_OUTPUT_DIR,
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
@@ -925,9 +926,10 @@ class ClientProxy:
     def _create_batch_archive(self, batch):
         """
         Creates a tar archive.
-        This archive contains the blue agent, a blue file and the outputs-directory.
+        This archive contains the blue agent, a blue file, the outputs-directory and the inputs-directory.
         The blue file is filled with the blue data from the given batch.
         The outputs-directory is an empty directory, with name 'outputs'
+        The inputs-directory is an empty directory, with name 'inputs'
         The tar archive and the blue file are always in memory and never stored on the local filesystem.
 
         The resulting archive is:
@@ -935,6 +937,7 @@ class ClientProxy:
         |--/blue_agent.py
         |--/blue_file.json
         |--/outputs/
+        |--/inputs/
 
         :param batch: The data to put into the blue file of the returned archive
         :type batch: dict
@@ -957,14 +960,12 @@ class ClientProxy:
         tar_file.addfile(blue_batch_tarinfo, io.BytesIO(blue_batch_content))
 
         # add outputs directory
-        output_directory_tarinfo = tarfile.TarInfo(CONTAINER_OUTDIR)
-        output_directory_tarinfo.type = tarfile.DIRTYPE
-        output_directory_tarinfo.uid = 1000
-        output_directory_tarinfo.gid = 1000
-        output_directory_tarinfo.uname = 'cc'
-        output_directory_tarinfo.gname = 'cc'
-        output_directory_tarinfo.mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IXUSR
+        output_directory_tarinfo = create_directory_tarinfo(CONTAINER_OUTPUT_DIR, owner_name='cc')
         tar_file.addfile(output_directory_tarinfo)
+
+        # add inputs directory
+        input_directory_tarinfo = create_directory_tarinfo(CONTAINER_INPUT_DIR, owner_name='cc')
+        tar_file.addfile(input_directory_tarinfo)
 
         # close file
         tar_file.close()
