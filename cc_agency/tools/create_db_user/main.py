@@ -1,3 +1,4 @@
+import os
 import json
 from argparse import ArgumentParser
 from subprocess import call
@@ -29,6 +30,11 @@ def main():
 
 
 def run(conf_file, host):
+    if not conf_file:
+        conf_file = os.path.join('~', '.config', 'cc-agency.yml')
+
+    conf_file = os.path.expanduser(conf_file)
+
     with open(conf_file) as f:
         conf = yaml.load(f)
 

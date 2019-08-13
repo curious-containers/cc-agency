@@ -4,6 +4,8 @@ from ruamel.yaml import YAML
 
 from cc_agency.commons.schemas.conf import conf_schema
 
+yaml = YAML(typ='safe')
+
 
 class Conf:
     def __init__(self, conf_file_path):
@@ -11,8 +13,6 @@ class Conf:
             conf_file_path = os.path.join('~', '.config', 'cc-agency.yml')
 
         conf_file_path = os.path.expanduser(conf_file_path)
-
-        yaml = YAML(typ='safe')
 
         with open(conf_file_path) as f:
             self.d = yaml.load(f)
