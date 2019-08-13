@@ -297,13 +297,17 @@ class Scheduler:
             available_gpus = self._get_available_gpus(node, batches)
 
             online = node['state'] == 'online'
+            
+            ram_available = None
+            if node['ram'] is not None:
+                ram_available = node['ram'] - used_ram
 
             complete_node = CompleteNode(
                 node_name=node_name,
                 online=online,
                 ram=node['ram'],
                 gpus=self._get_present_gpus(node['nodeName']),
-                ram_available=node['ram'] - used_ram,
+                ram_available=ram_available,
                 gpus_available=available_gpus,
                 num_batches_running=num_batches,
             )
