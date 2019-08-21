@@ -7,7 +7,8 @@ from typing import Dict
 import requests
 from bson.objectid import ObjectId
 
-from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
+from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError, \
+    NVIDIA_GPU_VENDOR
 from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
 from cc_agency.controller.docker import ClientProxy, TrusteeServiceError
@@ -232,7 +233,7 @@ class Scheduler:
         gpus = self._conf.d['controller']['docker']['nodes'][node_name].get('hardware', {}).get('gpus')
         if gpus:
             for gpu in gpus:
-                result.append(GPUDevice(device_id=gpu['id'], vram=gpu['vram']))
+                result.append(GPUDevice(device_id=gpu['id'], vram=gpu['vram'], vendor=NVIDIA_GPU_VENDOR))
 
         return result
 

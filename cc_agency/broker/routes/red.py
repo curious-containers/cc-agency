@@ -121,7 +121,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             raise BadRequest('CC-Agency requires outputs to be defined in RED data.')
 
         try:
-            engine_validation(data, 'container', ['docker', 'nvidia-docker'])
+            engine_validation(data, 'container', ['docker'])
         except Exception:
             raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 

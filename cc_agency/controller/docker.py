@@ -2,7 +2,6 @@ import io
 import json
 import os
 import tarfile
-import stat
 from threading import Thread, Event
 import concurrent.futures
 import time
@@ -21,7 +20,8 @@ import bson.errors
 from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys
-from cc_core.commons.engines import engine_to_runtime
+from cc_core.commons.docker_utils import create_container_with_gpus
+from cc_core.commons.engines import engine_to_runtime, NVIDIA_DOCKER_RUNTIME
 from cc_core.commons.files import create_directory_tarinfo
 from cc_core.commons.gpu_info import set_nvidia_environment_variables
 
@@ -163,6 +163,7 @@ class ClientProxy:
 
         # init docker client
         self._client = None
+        self._runtimes = None
         self._online = Event()  # type: Event
 
         self._inspection_event = Event()  # type: Event
@@ -172,7 +173,6 @@ class ClientProxy:
         if not self._init_docker_client():
             self.do_inspect()
             self._set_offline(format_exc())
-            return
 
         Thread(target=self._inspection_loop).start()
         Thread(target=self._check_for_batches_loop).start()
@@ -249,7 +249,8 @@ class ClientProxy:
         info = self._client.info()
         ram = info['MemTotal'] // (1024 * 1024)
         cpus = info['NCPU']
-        return ram, cpus
+        runtimes = info['Runtimes']
+        return ram, cpus, runtimes
 
     def _batch_containers(self, status):
         """
@@ -332,10 +333,10 @@ class ClientProxy:
         """
         Tries to execute a docker container using the docker client.
 
-        :return: A tuple (successful, (ram, cpus)/error)
+        :return: A tuple (successful, info/error)
                  successful: True, if the docker container could be executed, otherwise False
-                 (ram, cpus)/error: In case of success a tuple containing (ram, cpus), in case of failure the error
-                 message as string.
+                 info/error: In case of success a tuple containing (ram, cpus, runtimes),
+                 in case of failure the error message message as string.
         :rtype: tuple[bool, tuple or str]
         """
         command = ['echo', 'test']
@@ -377,7 +378,8 @@ class ClientProxy:
 
             successful, state = self._can_execute_container()
             if successful:
-                ram, cpus = state
+                ram, cpus, runtimes = state
+                self._runtimes = runtimes
                 if not self.is_online():
                     self._set_online(ram, cpus)
                     init_succeeded = True
@@ -799,16 +801,11 @@ class ClientProxy:
         """
         batch_id = str(batch['_id'])
 
-        # set nvidia gpu environment
-        runtime = engine_to_runtime(experiment['container']['engine'])
-
         environment = {}
         if self._environment:
             environment = self._environment.copy()
 
         gpus = batch['usedGPUs']
-        if gpus:
-            set_nvidia_environment_variables(environment, gpus)
 
         # set mount variables
         devices = []
@@ -847,16 +844,18 @@ class ClientProxy:
         if existing_container is not None:
             existing_container.remove(force=True)
 
-        container = self._client.containers.create(
-            image,
-            command,
+        container = create_container_with_gpus(
+            client=self._client,
+            image=image,
+            command=command,
+            available_runtimes=self._runtimes,
             name=batch_id,
             user='1000:1000',
             working_dir=CONTAINER_OUTPUT_DIR,
             detach=True,
             mem_limit=mem_limit,
             memswap_limit=mem_limit,
-            runtime=runtime,
+            gpus=gpus,
             environment=environment,
             network=self._network,
             devices=devices,
