@@ -50,14 +50,11 @@ def main():
     bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
     bind_socket_dir, _ = os.path.split(bind_socket_path)
 
-    if not os.path.exists(bind_socket_dir):
-        try:
-            os.makedirs(bind_socket_dir)
-        except Exception:
-            pass
+    os.makedirs(bind_socket_dir, exist_ok=True)
 
     old_umask = os.umask(0o077)
     context = zmq.Context()
+    # noinspection PyUnresolvedReferences
     socket = context.socket(zmq.PULL)
     socket.bind('ipc://{}'.format(bind_socket_path))
     os.umask(old_umask)

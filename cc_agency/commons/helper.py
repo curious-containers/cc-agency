@@ -9,14 +9,6 @@ from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-def calculate_agency_id(conf):
-    broker_external_url = conf.d['broker']['external_url'].rstrip('/')
-    kdf = create_kdf('fixedsalt'.encode('utf-8'))
-    agency_hash = kdf.derive(broker_external_url.encode('utf-8'))
-    agency_hash = hexlify(agency_hash).decode('utf-8')
-    return agency_hash[-8:]
-
-
 def get_ip():
     headers = ['HTTP_X_FORWARDED_FOR', 'HTTP_X_REAL_IP', 'REMOTE_ADDR']
     ip = None
@@ -43,7 +35,32 @@ def create_kdf(salt):
     )
 
 
-def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_failed=False):
+def batch_failure(
+        mongo,
+        batch_id,
+        debug_info,
+        ccagent,
+        current_state,
+        disable_retry_if_failed=False,
+        docker_stats=None
+):
+    """
+    Changes the db entry of the given batch to failed, if disable_retry_if_failed is set to True or if the maximal
+    number of retries is exceeded. Otherwise the new state of the given batch is set to registered.
+
+    :param mongo: The mongodb client to update
+    :param batch_id: The batch id specifying the batch to fail
+    :type batch_id: str
+    :param debug_info: The debug info to write to the db
+    :param ccagent: The ccagent to write to the db
+    :param current_state: The expected current state of the batch to cancel. If this state does not match the batch from
+                          the db, the db entry is not updated.
+    :type current_state: str
+    :param disable_retry_if_failed: If set to True, the batch is failed immediately, without giving another attempt
+    :param docker_stats: The optional stats of the docker container, that will written under the "docker_stats" key in
+                         the history of this batch
+    :type docker_stats: dict
+    """
     bson_id = ObjectId(batch_id)
 
     batch = mongo.db['batches'].find_one(
@@ -72,8 +89,8 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_f
             new_state = 'failed'
             new_node = node_name
 
-    mongo.db['batches'].update(
-        {'_id': bson_id},
+    mongo.db['batches'].update_one(
+        {'_id': bson_id, 'state': current_state},
         {
             '$set': {
                 'state': new_state,
@@ -85,7 +102,8 @@ def batch_failure(mongo, batch_id, debug_info, ccagent, conf, disable_retry_if_f
                     'time': timestamp,
                     'debugInfo': debug_info,
                     'node': new_node,
-                    'ccagent': ccagent
+                    'ccagent': ccagent,
+                    'dockerStats': docker_stats
                 }
             }
         }

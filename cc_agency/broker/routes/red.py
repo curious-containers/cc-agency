@@ -1,4 +1,3 @@
-import jsonschema
 from time import time
 
 from cc_core.commons.red import red_validation
@@ -6,6 +5,7 @@ from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
+from cc_core.commons.red import red_validation
 from cc_core.commons.engines import engine_validation
 from cc_core.commons.templates import get_template_keys, get_secret_values, normalize_keys
 from cc_core.commons.exceptions import exception_format
@@ -67,7 +67,8 @@ def _prepare_red_data(data, user):
                 'time': timestamp,
                 'debugInfo': None,
                 'node': None,
-                'ccagent': None
+                'ccagent': None,
+                'dockerStats': None
             }],
             'attempts': 0,
             'inputs': rb['inputs'],
@@ -95,8 +96,10 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         try:
             red_validation(data, False)
         except Exception as e:
-            raise BadRequest('Given RED data does not comply with jsonschema. '
-                             'Consider using the FAICE commandline tools for local validation.\n{}'.format(str(e)))
+            raise BadRequest(
+                'Given RED data is invalid. Consider using the FAICE commandline tools for local validation.\n{}'
+                .format(str(e))
+            )
 
         template_keys = set()
         get_template_keys(data, template_keys)
@@ -118,7 +121,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             raise BadRequest('CC-Agency requires outputs to be defined in RED data.')
 
         try:
-            engine_validation(data, 'container', ['docker', 'nvidia-docker'])
+            engine_validation(data, 'container', ['docker'])
         except Exception:
             raise BadRequest('\n'.join(exception_format(secret_values=secret_values)))
 
@@ -184,7 +187,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
                         'time': time(),
                         'debugInfo': None,
                         'node': None,
-                        'ccagent': None
+                        'ccagent': None,
+                        'dockerStats': None
                     }
                 }
             })

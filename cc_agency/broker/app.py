@@ -13,7 +13,6 @@ from cc_agency.commons.secrets import TrusteeClient
 from cc_agency.broker.auth import Auth
 from cc_agency.broker.routes.red import red_routes
 from cc_agency.broker.routes.nodes import nodes_routes
-from cc_agency.broker.routes.callback import callback_routes
 from cc_agency.broker.routes.auth import auth_routes
 
 
@@ -38,6 +37,7 @@ bind_socket_path = os.path.expanduser(conf.d['controller']['bind_socket_path'])
 bind_socket = 'ipc://{}'.format(bind_socket_path)
 
 context = zmq.Context()
+# noinspection PyUnresolvedReferences
 controller = context.socket(zmq.PUSH)
 controller.connect(bind_socket)
 
@@ -61,7 +61,6 @@ def get_version():
 
 red_routes(app, mongo, auth, controller, trustee_client)
 nodes_routes(app, mongo, auth, conf)
-callback_routes(app, mongo, auth, conf, controller, trustee_client)
 auth_routes(app, auth, conf)
 
 controller.send_json({'destination': 'scheduler'})
