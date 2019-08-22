@@ -349,14 +349,19 @@ class Scheduler:
         """
         Returns True if the node could be sufficient for the experiment, even if the node does not have
         sufficient hardware at the moment (because of running batches).
+
         :param node: The node to check
         :type node: CompleteNode
         :param experiment: The experiment for which the node is sufficient or not.
         :return: True, if the node is possibly sufficient otherwise False
         """
+        # check if node is initialized
+        if (node.ram is None) or (node.gpus is None):
+            return False
+
         if node.ram < experiment['container']['settings']['ram']:
             return False
-        
+
         gpu_requirements = get_gpu_requirements(experiment['container']['settings'].get('gpus'))
 
         try:
