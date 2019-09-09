@@ -26,6 +26,7 @@ from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DI
     CONTAINER_BLUE_FILE_PATH
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
+NVIDIA_INSPECTION_IMAGE = 'nvidia/cuda:8.0-runtime'
 NOFILE_LIMIT = 4096
 CHECK_EXITED_CONTAINERS_INTERVAL = 1.0
 OFFLINE_INSPECTION_INTERVAL = 10
@@ -163,6 +164,7 @@ class ClientProxy:
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
         self._base_url = node_conf['base_url']
+        self._has_nvidia_gpus = ClientProxy._has_nvidia_gpus(node_conf)
         self._tls = False
         if 'tls' in node_conf:
             self._tls = TLSConfig(**node_conf['tls'])
@@ -362,9 +364,11 @@ class ClientProxy:
         """
         command = ['echo', 'test']
 
+        inspection_image = NVIDIA_INSPECTION_IMAGE if self._has_nvidia_gpus else INSPECTION_IMAGE
+
         try:
             self._client.containers.run(
-                INSPECTION_IMAGE,
+                inspection_image,
                 command,
                 user='1000:1000',
                 remove=True,
@@ -932,6 +936,16 @@ class ClientProxy:
 
     def _pull_image_failure(self, debug_info, batch_id, current_state):
         batch_failure(self._mongo, batch_id, debug_info, None, current_state)
+
+    @staticmethod
+    def _has_nvidia_gpus(node_conf):
+        """
+        Returns whether gpus are configured in the given node configuration.
+
+        :param node_conf: The node configuration as dictionary
+        :return: True, if gpus are configured, otherwise False
+        """
+        return bool(node_conf.get('hardware', {}).get('gpus'))
 
 
 class TrusteeServiceError(Exception):
