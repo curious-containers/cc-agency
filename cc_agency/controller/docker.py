@@ -1,7 +1,6 @@
 import io
 import json
 import os
-import tarfile
 from threading import Thread, Event
 import concurrent.futures
 import time
@@ -19,15 +18,12 @@ import bson.errors
 
 from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
-    get_batch_secret_keys
-from cc_core.commons.docker_utils import create_container_with_gpus
-from cc_core.commons.engines import engine_to_runtime, NVIDIA_DOCKER_RUNTIME
-from cc_core.commons.files import create_directory_tarinfo
-from cc_core.commons.gpu_info import set_nvidia_environment_variables
+    get_batch_secret_keys, TrusteeClient
+from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive
 
 from cc_agency.commons.helper import batch_failure
 from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DIR, CONTAINER_AGENT_PATH, \
-    CONTAINER_BLUE_FILE_PATH, CONTAINER_INPUT_DIR
+    CONTAINER_BLUE_FILE_PATH
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
 NOFILE_LIMIT = 4096
@@ -85,13 +81,38 @@ def _pull_image(docker_client, image_url, auth, depending_batches):
     return ImagePullResult(image_url, auth, True, None, depending_batches)
 
 
-def _get_blue_agent_host_path():
+def fill_experiment_secret_keys(trustee_client, experiment):
     """
-    :return: the absolute path to the blue agent of the host system
-    :rtype: str
+    Returns the given experiment with filled template keys and values.
+
+    :param trustee_client: The trustee client to fetch the secret values to fill into the experiment
+    :type trustee_client: TrusteeClient
+    :param experiment: The experiment to complete.
+
+    :return: Returns the given experiment with filled template keys and values.
+
+    :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
+                                requested keys
     """
-    import cc_core.agent.blue.__main__ as blue_main
-    return blue_main.__file__
+    experiment_secret_keys = get_experiment_secret_keys(experiment)
+    response = trustee_client.collect(experiment_secret_keys)
+    if response['state'] == 'failed':
+
+        debug_info = response['debugInfo']
+
+        if response.get('inspect'):
+            response = trustee_client.inspect()
+            if response['state'] == 'failed':
+                debug_info = response['debug_info']
+                raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
+
+        experiment_id = str(experiment['_id'])
+        raise TrusteeServiceError(
+            'Trustee service request failed for experiment "{}":{}{}'.format(experiment_id, os.linesep, debug_info)
+        )
+
+    experiment_secrets = response['secrets']
+    return fill_experiment_secrets(experiment, experiment_secrets)
 
 
 class ClientProxy:
@@ -649,38 +670,9 @@ class ClientProxy:
             {'_id': ObjectId(experiment_id)},
         )
 
-        experiment = self._fill_experiment_secret_keys(experiment)
+        experiment = fill_experiment_secret_keys(self._trustee_client, experiment)
 
         return experiment
-
-    def _fill_experiment_secret_keys(self, experiment):
-        """
-        Returns the given experiment with filled template keys and values.
-
-        :param experiment: The experiment to complete.
-        :return: Returns the given experiment with filled template keys and values.
-        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
-        requested keys
-        """
-        experiment_secret_keys = get_experiment_secret_keys(experiment)
-        response = self._trustee_client.collect(experiment_secret_keys)
-        if response['state'] == 'failed':
-
-            debug_info = response['debugInfo']
-
-            if response.get('inspect'):
-                response = self._trustee_client.inspect()
-                if response['state'] == 'failed':
-                    debug_info = response['debug_info']
-                    raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
-
-            experiment_id = str(experiment['_id'])
-            raise TrusteeServiceError(
-                'Trustee service request failed for experiment "{}":{}{}'.format(experiment_id, os.linesep, debug_info)
-            )
-
-        experiment_secrets = response['secrets']
-        return fill_experiment_secrets(experiment, experiment_secrets)
 
     @staticmethod
     def _get_image_url(experiment):
@@ -865,9 +857,8 @@ class ClientProxy:
         )  # type: Container
 
         # copy blue agent and blue file to container
-        tar_archive = self._create_batch_archive(batch)
-        container.put_archive('/', tar_archive)
-        tar_archive.close()
+        with self._create_batch_archive(batch) as tar_archive:
+            container.put_archive('/', tar_archive)
 
         container.start()
 
@@ -924,53 +915,17 @@ class ClientProxy:
 
     def _create_batch_archive(self, batch):
         """
-        Creates a tar archive.
-        This archive contains the blue agent, a blue file, the outputs-directory and the inputs-directory.
-        The blue file is filled with the blue data from the given batch.
-        The outputs-directory is an empty directory, with name 'outputs'
-        The inputs-directory is an empty directory, with name 'inputs'
-        The tar archive and the blue file are always in memory and never stored on the local filesystem.
-
-        The resulting archive is:
-        /cc
-        |--/blue_agent.py
-        |--/blue_file.json
-        |--/outputs/
-        |--/inputs/
+        Creates a tar archive to put into the docker container for the blue agent execution.
+        The blue data is extracted from the given batch.
 
         :param batch: The data to put into the blue file of the returned archive
         :type batch: dict
         :return: A tar archive containing the blue agent and the given blue batch
         :rtype: io.BytesIO or bytes
         """
-        data_file = io.BytesIO()
-        tar_file = tarfile.open(mode='w', fileobj=data_file)
+        blue_data = self._create_blue_batch(batch)
 
-        # add blue agent
-        tar_file.add(_get_blue_agent_host_path(), arcname=CONTAINER_AGENT_PATH, recursive=False)
-
-        # add blue file. See https://bugs.python.org/issue22208 for more information
-        blue_batch = self._create_blue_batch(batch)
-        blue_batch_content = json.dumps(blue_batch).encode('utf-8')
-
-        blue_batch_tarinfo = tarfile.TarInfo(CONTAINER_BLUE_FILE_PATH)
-        blue_batch_tarinfo.size = len(blue_batch_content)
-
-        tar_file.addfile(blue_batch_tarinfo, io.BytesIO(blue_batch_content))
-
-        # add outputs directory
-        output_directory_tarinfo = create_directory_tarinfo(CONTAINER_OUTPUT_DIR, owner_name='cc')
-        tar_file.addfile(output_directory_tarinfo)
-
-        # add inputs directory
-        input_directory_tarinfo = create_directory_tarinfo(CONTAINER_INPUT_DIR, owner_name='cc')
-        tar_file.addfile(input_directory_tarinfo)
-
-        # close file
-        tar_file.close()
-        data_file.seek(0)
-
-        return data_file
+        return create_batch_archive(blue_data)
 
     def _run_batch_container_failure(self, batch_id, debug_info, current_state):
         batch_failure(self._mongo, batch_id, debug_info, None, current_state)

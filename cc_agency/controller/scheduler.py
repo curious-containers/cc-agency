@@ -11,9 +11,9 @@ from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements
     NVIDIA_GPU_VENDOR
 from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
-from cc_agency.controller.docker import ClientProxy, TrusteeServiceError
+from cc_agency.controller.docker import ClientProxy, fill_experiment_secret_keys
 from cc_agency.commons.helper import batch_failure
-from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets
+from cc_agency.commons.secrets import get_experiment_secret_keys
 from cc_agency.commons.secrets import get_batch_secret_keys
 
 _CRON_INTERVAL = 60
@@ -629,37 +629,9 @@ class Scheduler:
             {'container.settings': 1, 'execution.settings': 1}
         )
 
-        experiment = self._fill_experiment_secret_keys(experiment)
+        experiment = fill_experiment_secret_keys(self._trustee_client, experiment)
 
         return experiment
-
-    def _fill_experiment_secret_keys(self, experiment):
-        """
-        Returns the given experiment with filled template keys and values.
-        :param experiment: The experiment to complete.
-        :return: Returns the given experiment with filled template keys and values.
-        :raise TrusteeServiceError: If the trustee service is unavailable or the trustee service could not fulfill all
-        requested keys
-        """
-        experiment_secret_keys = get_experiment_secret_keys(experiment)
-        response = self._trustee_client.collect(experiment_secret_keys)
-        if response['state'] == 'failed':
-
-            debug_info = response['debugInfo']
-
-            if response.get('inspect'):
-                response = self._trustee_client.inspect()
-                if response['state'] == 'failed':
-                    debug_info = response['debug_info']
-                    raise TrusteeServiceError('Trustee service unavailable:{}{}'.format(os.linesep, debug_info))
-
-            experiment_id = str(experiment['_id'])
-            raise TrusteeServiceError(
-                'Trustee service request failed for experiment "{}":{}{}'.format(experiment_id, os.linesep, debug_info)
-            )
-
-        experiment_secrets = response['secrets']
-        return fill_experiment_secrets(experiment, experiment_secrets)
 
     def _fifo(self):
         cursor = self._mongo.db['batches'].aggregate([
