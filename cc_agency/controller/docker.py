@@ -9,7 +9,9 @@ from typing import List, Tuple, Dict
 
 import docker
 import jsonschema
+import pymongo
 from docker.models.containers import Container
+from docker.models.images import Image
 from docker.tls import TLSConfig
 from docker.types import Ulimit
 import docker.errors
@@ -19,7 +21,7 @@ import bson.errors
 from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys, TrusteeClient
-from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive
+from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive, image_to_str
 
 from cc_agency.commons.helper import batch_failure
 from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DIR, CONTAINER_AGENT_PATH, \
@@ -31,6 +33,7 @@ NOFILE_LIMIT = 4096
 CHECK_EXITED_CONTAINERS_INTERVAL = 1.0
 OFFLINE_INSPECTION_INTERVAL = 10
 CHECK_FOR_BATCHES_INTERVAL = 20
+IMAGE_PRUNE_INTERVAL = 60
 
 
 class ImagePullResult:
@@ -156,13 +159,14 @@ class ClientProxy:
 
     def __init__(self, node_name, conf, mongo, trustee_client, scheduling_event):
         self._node_name = node_name
-        self._conf = conf
         self._mongo = mongo
         self._trustee_client = trustee_client
 
         self._scheduling_event = scheduling_event
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
+        self._images_prune_duration = conf.d['controller']['docker'].get('images_prune_duration')
+        self._last_prune_timestamp = 0
         self._base_url = node_conf['base_url']
         self._has_nvidia_gpus = ClientProxy._has_nvidia_gpus(node_conf)
         self._tls = False
@@ -577,6 +581,7 @@ class ClientProxy:
     def _check_for_batches_loop(self):
         """
         Regularly calls _check_for_batches. Does wait before executing a new cycle, if this client proxy is offline.
+        Also prunes unused images.
         """
         while True:
             self._online.wait()
@@ -588,6 +593,66 @@ class ClientProxy:
                 self._check_for_batches()
             except TrusteeServiceError:
                 self.do_inspect()
+                continue
+
+            self._prune_docker_images()
+
+    def _get_images_with_last_registration_time(self):
+        """
+        Returns a dict with images as keys and  last_registration_timestamps as values.
+        The images are gathered from all experiments executed in this agency. The resulting list only contains images,
+        which are present on the host.
+        The last_registration_timestamp is the latest timestamp when an experiment was registered that uses this image.
+
+        :return: A dict {images: last_execution_timestamps}
+                 key: the docker image as Image object
+                 value: last_execution_timestamp is a unix timestamp defining the last execution of the given image
+        :rtype: Dict[Image, float]
+        """
+        images_with_execution_time = {}
+
+        for image_url in self._mongo.db.experiments.distinct('container.settings.image.url'):
+            try:
+                image = self._client.image.get(image_url)
+            except docker.errors.ImageNotFound:
+                # if image does not exist on this host, proceed
+                continue
+
+            latest_experiment = self._mongo.experiments.find_one(
+                {'container.settings.image.url': image_url},
+                sort=[('registrationTime', pymongo.DESCENDING)]
+            )
+
+            registration_time = latest_experiment['registrationTime']
+
+            # update dict, except the image is already present with later timestamp
+            if images_with_execution_time.get(image, 0) < registration_time:
+                images_with_execution_time[image] = registration_time
+
+        return images_with_execution_time
+
+    def _prune_docker_images(self):
+        """
+        Removes all docker images, that are created longer ago than self._images_prune_duration.
+        """
+        if self._images_prune_duration is None:
+            return
+
+        t = time.time()
+        # check if it is time to prune images
+        if self._last_prune_timestamp + IMAGE_PRUNE_INTERVAL > t:
+            return
+
+        self._last_prune_timestamp = t
+
+        used_images = self._get_images_with_last_registration_time()
+
+        until_filter = time.time() - self._images_prune_duration
+
+        for image, last_registration_timestamp in used_images.items():
+            if last_registration_timestamp < until_filter:
+                self._client.images.remove(image)
+                print('removed image {}'.format(image_to_str(image)))
 
     def _check_for_batches(self):
         """
