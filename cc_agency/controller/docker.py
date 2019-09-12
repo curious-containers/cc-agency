@@ -165,7 +165,7 @@ class ClientProxy:
         self._scheduling_event = scheduling_event
 
         node_conf = conf.d['controller']['docker']['nodes'][node_name]
-        self._images_prune_duration = conf.d['controller']['docker'].get('images_prune_duration')
+        self._image_prune_duration = conf.d['controller']['docker'].get('image_prune_duration')
         self._last_prune_timestamp = 0
         self._base_url = node_conf['base_url']
         self._has_nvidia_gpus = ClientProxy._has_nvidia_gpus(node_conf)
@@ -633,9 +633,9 @@ class ClientProxy:
 
     def _prune_docker_images(self):
         """
-        Removes all docker images, that are created longer ago than self._images_prune_duration.
+        Removes all docker images, that are created longer ago than self._image_prune_duration.
         """
-        if self._images_prune_duration is None:
+        if self._image_prune_duration is None:
             return
 
         t = time.time()
@@ -647,7 +647,7 @@ class ClientProxy:
 
         used_images = self._get_images_with_last_registration_time()
 
-        until_filter = time.time() - self._images_prune_duration
+        until_filter = time.time() - self._image_prune_duration
 
         for image, last_registration_timestamp in used_images.items():
             if last_registration_timestamp < until_filter:

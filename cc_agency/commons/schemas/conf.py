@@ -81,7 +81,7 @@ conf_schema = {
                             'additionalProperties': False
                         },
                         'allow_insecure_capabilities': {'type': 'boolean'},
-                        'images_prune_duration': {'type': 'number'}
+                        'image_prune_duration': {'type': 'number'}
                     },
                     'additionalProperties': False,
                     'required': ['nodes']
