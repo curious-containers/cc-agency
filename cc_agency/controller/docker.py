@@ -651,7 +651,10 @@ class ClientProxy:
 
         for image, last_registration_timestamp in used_images.items():
             if last_registration_timestamp < until_filter:
-                self._client.images.remove(image.id)
+                try:
+                    self._client.images.remove(image.id)
+                except docker.errors.APIError:
+                    continue  # if image is used by other images
                 print('removed image {}'.format(image_to_str(image)))
 
     def _check_for_batches(self):
