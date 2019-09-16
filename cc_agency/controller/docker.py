@@ -618,7 +618,7 @@ class ClientProxy:
                 # if image does not exist on this host, proceed
                 continue
 
-            latest_experiment = self._mongo.experiments.find_one(
+            latest_experiment = self._mongo.db.experiments.find_one(
                 {'container.settings.image.url': image_url},
                 sort=[('registrationTime', pymongo.DESCENDING)]
             )
