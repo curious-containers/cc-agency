@@ -613,7 +613,7 @@ class ClientProxy:
 
         for image_url in self._mongo.db.experiments.distinct('container.settings.image.url'):
             try:
-                image = self._client.image.get(image_url)
+                image = self._client.images.get(image_url)
             except docker.errors.ImageNotFound:
                 # if image does not exist on this host, proceed
                 continue
