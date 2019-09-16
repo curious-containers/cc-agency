@@ -651,7 +651,7 @@ class ClientProxy:
 
         for image, last_registration_timestamp in used_images.items():
             if last_registration_timestamp < until_filter:
-                self._client.images.remove(image)
+                self._client.images.remove(image.id)
                 print('removed image {}'.format(image_to_str(image)))
 
     def _check_for_batches(self):
