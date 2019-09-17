@@ -532,10 +532,10 @@ class ClientProxy:
             return
 
         batch = self._mongo.db['batches'].find_one(
-            {'_id': bson_batch_id, 'state': 'processing'},
-            {'attempts': 1, 'node': 1}
+            {'_id': bson_batch_id},
+            {'attempts': 1, 'node': 1, 'state': 1}
         )
-        if not batch:
+        if batch['state'] != 'processing':
             debug_info = 'Batch failed.\nExited container, but not in state processing.'
             batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
             return
