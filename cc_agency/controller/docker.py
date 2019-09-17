@@ -507,7 +507,9 @@ class ClientProxy:
             {'attempts': 1, 'node': 1}
         )
         if not batch:
-            raise ValueError('batch id "{}" not found.'.format(batch_id))
+            debug_info = 'Batch failed.\nExited container, but not in state processing.'
+            batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
+            return
 
         self._mongo.db['batches'].update_one(
             {

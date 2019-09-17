@@ -64,9 +64,14 @@ def batch_failure(
     bson_id = ObjectId(batch_id)
 
     batch = mongo.db['batches'].find_one(
-        {'_id': bson_id},
+        {
+            '_id': bson_id,
+            'state': {'$nin': ['succeeded', 'failed', 'cancelled']}
+        },
         {'attempts': 1, 'node': 1, 'experimentId': 1}
     )
+    if not batch:
+        return
 
     timestamp = time()
     attempts = batch['attempts']
