@@ -17,7 +17,6 @@ def _get_node_gpu_info(conf_nodes, node_name):
 def nodes_routes(app, mongo, auth, conf):
     @app.route('/nodes', methods=['GET'])
     def get_nodes():
-        conf_nodes = conf.d['controller']['docker']['nodes']
         user = auth.verify_user(request.authorization)
         if not user:
             raise Unauthorized()

@@ -438,7 +438,10 @@ class ClientProxy:
         try:
             gpu_devices = detect_nvidia_docker_gpus(self._client, self._runtimes)
             if self._gpu_blacklist:
-                self._gpus = list(filter(lambda gpu_device: gpu_device.device_id not in self._gpu_blacklist, gpu_devices))
+                self._gpus = list(filter(
+                    lambda gpu_device: gpu_device.device_id not in self._gpu_blacklist,
+                    gpu_devices
+                ))
             else:
                 self._gpus = gpu_devices
         except docker.errors.DockerException:
