@@ -8,7 +8,7 @@ from traceback import format_exc
 from typing import List, Tuple, Dict
 
 import docker
-from docker.errors import DockerException
+from docker.errors import DockerException, APIError
 import jsonschema
 import pymongo
 from requests.exceptions import ConnectionError
@@ -399,7 +399,7 @@ class ClientProxy:
                 network=self._network
             )
             info = self._info()
-        except DockerException as e:
+        except (DockerException, ConnectionError) as e:
             return False, str(e)
 
         return True, info
@@ -452,7 +452,7 @@ class ClientProxy:
                 ))
             else:
                 self._gpus = gpu_devices
-        except DockerException:
+        except (DockerException, ConnectionError):
             pass
 
     def _inspection_loop(self):
@@ -658,6 +658,9 @@ class ClientProxy:
             except docker.errors.ImageNotFound:
                 # if image does not exist on this host, proceed
                 continue
+            except ConnectionError:
+                self.do_inspect()
+                continue
 
             latest_experiment = self._mongo.db.experiments.find_one(
                 {'container.settings.image.url': image_url},
@@ -694,8 +697,11 @@ class ClientProxy:
             if last_registration_timestamp < until_filter:
                 try:
                     self._client.images.remove(image.id)
-                except docker.errors.APIError:
+                except APIError:
                     continue  # if image is used by other images
+                except ConnectionError:
+                    self.do_inspect()
+                    continue
                 print('removed image {}'.format(image_to_str(image)))
 
     def _check_for_batches(self):
