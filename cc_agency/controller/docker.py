@@ -452,8 +452,10 @@ class ClientProxy:
                 ))
             else:
                 self._gpus = gpu_devices
-        except (DockerException, ConnectionError):
+        except DockerException:
             pass
+        except ConnectionError:
+            self.do_inspect()
 
     def _inspection_loop(self):
         """
@@ -701,7 +703,7 @@ class ClientProxy:
                     continue  # if image is used by other images
                 except ConnectionError:
                     self.do_inspect()
-                    continue
+                    break
                 print('removed image {}'.format(image_to_str(image)))
 
     def _check_for_batches(self):
