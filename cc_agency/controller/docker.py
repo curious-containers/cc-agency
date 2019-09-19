@@ -10,6 +10,7 @@ from typing import List, Tuple, Dict
 import docker
 import jsonschema
 import pymongo
+from cc_core.commons.gpu_info import GPUDevice, NVIDIA_GPU_VENDOR
 from docker.models.containers import Container
 from docker.models.images import Image
 from docker.tls import TLSConfig
@@ -21,7 +22,8 @@ import bson.errors
 from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys, TrusteeClient
-from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive, image_to_str
+from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive, image_to_str, \
+    detect_nvidia_docker_gpus
 
 from cc_agency.commons.helper import batch_failure
 from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DIR, CONTAINER_AGENT_PATH, \
@@ -168,7 +170,6 @@ class ClientProxy:
         self._image_prune_duration = conf.d['controller']['docker'].get('image_prune_duration')
         self._last_prune_timestamp = 0
         self._base_url = node_conf['base_url']
-        self._has_nvidia_gpus = ClientProxy._has_nvidia_gpus(node_conf)
         self._tls = False
         if 'tls' in node_conf:
             self._tls = TLSConfig(**node_conf['tls'])
@@ -182,7 +183,8 @@ class ClientProxy:
             'state': None,
             'history': [],
             'ram': None,
-            'cpus': None
+            'cpus': None,
+            'gpus': None
         }
 
         bson_node_id = self._mongo.db['nodes'].insert_one(node).inserted_id
@@ -191,6 +193,7 @@ class ClientProxy:
         # init docker client
         self._client = None
         self._runtimes = None
+        self._gpus = None  # type: List[GPUDevice] or None
         self._online = Event()  # type: Event
 
         self._inspection_event = Event()  # type: Event
@@ -215,6 +218,8 @@ class ClientProxy:
     def _set_online(self, ram, cpus):
         print('Node online:', self._node_name)
 
+        gpus = list(map(lambda gpu_device: gpu_device.to_dict(), self._gpus)) if (self._gpus is not None) else None
+
         bson_node_id = ObjectId(self._node_id)
         self._mongo.db['nodes'].update_one(
             {'_id': bson_node_id},
@@ -222,7 +227,8 @@ class ClientProxy:
                 '$set': {
                     'state': 'online',
                     'ram': ram,
-                    'cpus': cpus
+                    'cpus': cpus,
+                    'gpus': gpus
                 },
                 '$push': {
                     'history': {
@@ -362,13 +368,14 @@ class ClientProxy:
 
         :return: A tuple (successful, info/error)
                  successful: True, if the docker container could be executed, otherwise False
-                 info/error: In case of success a tuple containing (ram, cpus, runtimes),
-                 in case of failure the error message message as string.
+                 info/error:
+                   - In case of success a tuple containing (ram, cpus, runtimes),
+                   - In case of failure the error message as string.
         :rtype: tuple[bool, tuple or str]
         """
         command = ['echo', 'test']
 
-        inspection_image = NVIDIA_INSPECTION_IMAGE if self._has_nvidia_gpus else INSPECTION_IMAGE
+        inspection_image = NVIDIA_INSPECTION_IMAGE if self._has_nvidia_gpus() else INSPECTION_IMAGE
 
         try:
             self._client.containers.run(
@@ -397,6 +404,7 @@ class ClientProxy:
     def _init_docker_client(self):
         """
         Tries to reinitialize the docker client. If successful, this node is online after this function execution.
+        After initialization tries to detect nvidia gpus.
 
         :return: True, if the initialization succeeded, otherwise False
         :rtype: bool
@@ -409,12 +417,24 @@ class ClientProxy:
             if successful:
                 ram, cpus, runtimes = state
                 self._runtimes = runtimes
+                self._init_gpus()  # try to detect gpus
                 if not self.is_online():
                     self._set_online(ram, cpus)
                     init_succeeded = True
         except docker.errors.DockerException:
             pass
         return init_succeeded
+
+    def _init_gpus(self):
+        """
+        Tries to detect gpus for this ClientProxy by executing nvidia-smi in a docker container.
+        If found sets self._gpus to a list of detected gpu devices and updates the mongo db entries for gpus.
+        """
+        try:
+            gpu_devices = detect_nvidia_docker_gpus(self._client, self._runtimes)
+            self._gpus = gpu_devices
+        except docker.errors.DockerException:
+            pass
 
     def _inspection_loop(self):
         """
@@ -764,18 +784,19 @@ class ClientProxy:
         """
         Reads the docker authentication information from the given experiment and returns it as tuple. The first element
         is always the image_url for the docker image. The second element is a tuple containing the username and password
-        for authentication at the docker registry. If no username and password is given, the second return value is None
+        for authentication at the docker registry. If no username and password is given, the second return value is
+        None.
 
         :param experiment: An experiment with filled secret keys, whose image authentication information should be
-        returned
+                           returned
         :type experiment: Dict
 
         :return: A tuple containing the image_url as first element. The second element can be None or a Tuple containing
-        (username, password) for authentication at the docker registry.
+                 (username, password) for authentication at the docker registry.
         :rtype: Tuple[str, None] or Tuple[str, Tuple[str, str]]
 
         :raise ImageAuthenticationError: If the given image authentication information is not complete
-        (username and password are mandatory)
+                                         (username and password are mandatory)
         """
 
         image_url = ClientProxy._get_image_url(experiment)
@@ -803,7 +824,6 @@ class ClientProxy:
         :type batch: dict
         :param experiment: The experiment of this batch
         :type experiment: dict
-        :return:
         """
         try:
             self._run_batch_container(batch, experiment)
@@ -1007,15 +1027,17 @@ class ClientProxy:
     def _pull_image_failure(self, debug_info, batch_id, current_state):
         batch_failure(self._mongo, batch_id, debug_info, None, current_state)
 
-    @staticmethod
-    def _has_nvidia_gpus(node_conf):
+    def _has_nvidia_gpus(self):
         """
-        Returns whether gpus are configured in the given node configuration.
+        Returns whether nvidia gpus are configured for this ClientProxy.
 
-        :param node_conf: The node configuration as dictionary
         :return: True, if gpus are configured, otherwise False
+        :rtype: bool
         """
-        return bool(node_conf.get('hardware', {}).get('gpus'))
+        if self._gpus is None:
+            return False
+
+        return any(map(lambda gpu: gpu.vendor == NVIDIA_GPU_VENDOR, self._gpus))
 
 
 class TrusteeServiceError(Exception):
