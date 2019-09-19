@@ -53,9 +53,6 @@ def nodes_routes(app, mongo, auth, conf):
                 if b['node'] == node['nodeName']
             ]
             node['currentBatches'] = batches_ram
-            gpu_info = _get_node_gpu_info(conf_nodes, node['nodeName'])
-            if gpu_info:
-                node['gpus'] = gpu_info
             del node['_id']
 
         return jsonify(nodes)
