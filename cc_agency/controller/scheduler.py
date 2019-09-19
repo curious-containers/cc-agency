@@ -250,7 +250,7 @@ class Scheduler:
 
     def _get_cluster_state(self):
         """
-        Returns a list of complete nodes, which are currently present in the cluster.
+        :return: a list of complete nodes, which are currently present in the cluster.
         :rtype: List[CompleteNode]
         """
         cursor = self._mongo.db['nodes'].find(
@@ -382,6 +382,7 @@ class Scheduler:
     def _get_best_node(nodes, experiment):
         """
         Returns the node, that fits best for the given experiment. If no node could be found returns None
+
         :param nodes: The nodes, that are available for this experiment.
         :type nodes: List[CompleteNode]
         :param experiment: The description of the experiment
