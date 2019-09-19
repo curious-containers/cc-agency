@@ -2,13 +2,12 @@ import os
 import sys
 from threading import Thread, Event
 from time import time, sleep
-from typing import Dict
+from typing import Dict, List
 
 import requests
 from bson.objectid import ObjectId
 
-from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError, \
-    NVIDIA_GPU_VENDOR
+from cc_core.commons.gpu_info import GPUDevice, match_gpus, get_gpu_requirements, InsufficientGPUError
 from cc_core.commons.red import red_get_mount_connectors_from_inputs
 
 from cc_agency.controller.docker import ClientProxy, fill_experiment_secret_keys
@@ -27,12 +26,13 @@ class CompleteNode:
     def __init__(self, node_name, online, ram, gpus, ram_available, gpus_available, num_batches_running):
         """
         Initialises a new CompleteNode.
+
         :param node_name: The name of the node given by the agency config.
         :param online: Whether the given node is online or not.
         :param ram: The amount of ram of this node.
         :param gpus: The GPUs that are present on this node. Does include gpus, which are used by batches.
         :param ram_available: The ram that is available. Given by the amount of ram of the node minus the amount of ram
-        used by batches.
+                              used by batches.
         :param gpus_available: The GPUs that are available and not used by batches.
         :param num_batches_running: The number of batches currently running on the node.
         """
@@ -226,16 +226,10 @@ class Scheduler:
 
         :param node_name: The name of the node
         :return: A list of GPUDevices, which are representing the GPU Devices present on the specified node
+        :rtype: List[GPUDevice] or None
         """
 
-        result = []
-
-        gpus = self._conf.d['controller']['docker']['nodes'][node_name].get('hardware', {}).get('gpus')
-        if gpus:
-            for gpu in gpus:
-                result.append(GPUDevice(device_id=gpu['id'], vram=gpu['vram'], vendor=NVIDIA_GPU_VENDOR))
-
-        return result
+        return self._nodes[node_name].get_gpus() or []
 
     def _get_available_gpus(self, node, batches):
         """
@@ -621,6 +615,7 @@ class Scheduler:
     def _get_experiment_of_batch(self, experiment_id):
         """
         Returns the experiment of the given experiment_id with filled secrets.
+
         :param experiment_id: The experiment id to resolve.
         :return: The experiment as dictionary with filled template values.
         """

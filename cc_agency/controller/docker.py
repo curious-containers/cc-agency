@@ -212,6 +212,9 @@ class ClientProxy:
         self._pull_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
         self._run_executor = concurrent.futures.ThreadPoolExecutor(max_workers=ClientProxy.NUM_WORKERS)
 
+    def get_gpus(self):
+        return self._gpus
+
     def is_online(self):
         return self._online.is_set()
 
