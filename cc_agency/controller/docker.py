@@ -9,28 +9,25 @@ from typing import List, Tuple, Dict
 
 import docker
 from docker.errors import DockerException, APIError
-import jsonschema
-import pymongo
-from requests.exceptions import ConnectionError
-
-from cc_core.commons.gpu_info import GPUDevice, NVIDIA_GPU_VENDOR
 from docker.models.containers import Container
 from docker.models.images import Image
 from docker.tls import TLSConfig
 from docker.types import Ulimit
-import docker.errors
+import jsonschema
+import pymongo
+from requests.exceptions import ConnectionError
 from bson.objectid import ObjectId
 import bson.errors
 
+from cc_core.commons.gpu_info import GPUDevice, NVIDIA_GPU_VENDOR
 from cc_agency.commons.schemas.callback import agent_result_schema
 from cc_agency.commons.secrets import get_experiment_secret_keys, fill_experiment_secrets, fill_batch_secrets, \
     get_batch_secret_keys, TrusteeClient
 from cc_core.commons.docker_utils import create_container_with_gpus, create_batch_archive, image_to_str, \
     detect_nvidia_docker_gpus
-
-from cc_agency.commons.helper import batch_failure
 from cc_core.commons.red_to_blue import convert_red_to_blue, CONTAINER_OUTPUT_DIR, CONTAINER_AGENT_PATH, \
     CONTAINER_BLUE_FILE_PATH
+from cc_agency.commons.helper import batch_failure
 
 INSPECTION_IMAGE = 'docker.io/busybox:latest'
 NVIDIA_INSPECTION_IMAGE = 'nvidia/cuda:8.0-runtime'
