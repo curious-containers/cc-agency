@@ -61,17 +61,15 @@ def batch_failure(
                          the history of this batch
     :type docker_stats: dict
     """
+    if current_state in ['succeeded', 'failed', 'cancelled']:
+        return
+
     bson_id = ObjectId(batch_id)
 
     batch = mongo.db['batches'].find_one(
-        {
-            '_id': bson_id,
-            'state': {'$nin': ['succeeded', 'failed', 'cancelled']}
-        },
+        {'_id': bson_id},
         {'attempts': 1, 'node': 1, 'experimentId': 1}
     )
-    if not batch:
-        return
 
     timestamp = time()
     attempts = batch['attempts']
