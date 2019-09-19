@@ -8,8 +8,11 @@ from traceback import format_exc
 from typing import List, Tuple, Dict
 
 import docker
+from docker.errors import DockerException
 import jsonschema
 import pymongo
+from requests.exceptions import ConnectionError
+
 from cc_core.commons.gpu_info import GPUDevice, NVIDIA_GPU_VENDOR
 from docker.models.containers import Container
 from docker.models.images import Image
@@ -300,7 +303,7 @@ class ClientProxy:
         :return: A dictionary mapping container names to docker containers
         :rtype: Dict[str, Container]
 
-        :raise docker.errors.DockerException: If the docker engine returns an error
+        :raise DockerException: If the docker engine returns an error
         """
         batch_containers = {}  # type: Dict[str, Container]
 
@@ -311,7 +314,12 @@ class ClientProxy:
         if status is None:
             filters = None
 
-        containers = self._client.containers.list(all=True, limit=-1, filters=filters)  # type: List[Container]
+        try:
+            containers = self._client.containers.list(all=True, limit=-1, filters=filters)  # type: List[Container]
+        except ConnectionError as e:
+            raise DockerException(
+                'Could not list current containers. Failed with the following message:\n{}'.format(str(e))
+            )
 
         for c in containers:
             try:
@@ -345,7 +353,7 @@ class ClientProxy:
         """
         Stops all docker containers, whose batches got cancelled.
 
-        :raise docker.errors.DockerException: If the docker server returns an error
+        :raise DockerException: If the docker server returns an error
         """
         running_containers = self._batch_containers('running')
 
@@ -391,7 +399,7 @@ class ClientProxy:
                 network=self._network
             )
             info = self._info()
-        except docker.errors.DockerException as e:
+        except DockerException as e:
             return False, str(e)
 
         return True, info
@@ -425,7 +433,7 @@ class ClientProxy:
                 if not self.is_online():
                     self._set_online(ram, cpus)
                     init_succeeded = True
-        except docker.errors.DockerException:
+        except DockerException:
             pass
         return init_succeeded
 
@@ -444,7 +452,7 @@ class ClientProxy:
                 ))
             else:
                 self._gpus = gpu_devices
-        except docker.errors.DockerException:
+        except DockerException:
             pass
 
     def _inspection_loop(self):
@@ -479,7 +487,7 @@ class ClientProxy:
         :return: True if a exited container was found, otherwise False
         :rtype: bool
 
-        :raise docker.errors.DockerException:
+        :raise DockerException: If the connection to the docker daemon is interrupted
         """
         exited_containers = self._batch_containers('exited')  # type: Dict[str, Container]
 
@@ -518,7 +526,7 @@ class ClientProxy:
 
                 if resources_freed:
                     self._scheduling_event.set()
-            except docker.errors.DockerException:
+            except DockerException:
                 self.do_inspect()
 
     def _check_exited_container(self, container, batch):
@@ -895,6 +903,8 @@ class ClientProxy:
         :type batch: Dict[str, Any]
         :param experiment: The experiment of the given batch
         :type experiment: Dict[str, Any]
+
+        :raise DockerException: If the connection to the docker daemon is broken
         """
         batch_id = str(batch['_id'])
 
