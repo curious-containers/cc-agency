@@ -176,6 +176,7 @@ class ClientProxy:
 
         self._environment = node_conf.get('environment')
         self._network = node_conf.get('network')
+        self._gpu_blacklist = node_conf.get('hardware', {}).get('gpu_blacklist')
 
         # create db entry for this node
         node = {
@@ -431,11 +432,15 @@ class ClientProxy:
     def _init_gpus(self):
         """
         Tries to detect gpus for this ClientProxy by executing nvidia-smi in a docker container.
-        If found sets self._gpus to a list of detected gpu devices and updates the mongo db entries for gpus.
+        If found sets self._gpus to a list of detected gpu devices. Does consider self._gpu_blacklist to ignore certain
+        gpus.
         """
         try:
             gpu_devices = detect_nvidia_docker_gpus(self._client, self._runtimes)
-            self._gpus = gpu_devices
+            if self._gpu_blacklist:
+                self._gpus = list(filter(lambda gpu_device: gpu_device not in self._gpu_blacklist, gpu_devices))
+            else:
+                self._gpus = gpu_devices
         except docker.errors.DockerException:
             pass
 

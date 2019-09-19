@@ -60,7 +60,7 @@ class Scheduler:
         self._nodes = {
             node_name: ClientProxy(node_name, conf, mongo, trustee_client, self._scheduling_event)
             for node_name
-            in conf.d['controller']['docker']['nodes'].keys()
+            in sorted(conf.d['controller']['docker']['nodes'].keys())
         }  # type: Dict[str, ClientProxy]
 
         Thread(target=self._scheduling_loop).start()
