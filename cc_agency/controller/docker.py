@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 from threading import Thread, Event
 import concurrent.futures
 import time
@@ -289,6 +290,16 @@ class ClientProxy:
         runtimes = info['Runtimes']
         return ram, cpus, runtimes
 
+    @staticmethod
+    def _log(message):
+        """
+        Logs a message by printing it to make it visible to journalctl.
+
+        :param message: The message to print
+        :type message: str
+        """
+        print(message, file=sys.stderr)
+
     def _batch_containers(self, status):
         """
         Returns a dictionary that maps container names to the corresponding container.
@@ -326,25 +337,6 @@ class ClientProxy:
                 pass
 
         return batch_containers
-
-    def _fail_batches_without_assigned_container(self):
-        containers = self._batch_containers(None)
-
-        cursor = self._mongo.db['batches'].find(
-            {
-                'node': self._node_name,
-                'state': {'$in': ['processing']}
-            },
-            {'_id': 1, 'state': 1}
-        )
-
-        for batch in cursor:
-            bson_id = batch['_id']
-            batch_id = str(bson_id)
-
-            if batch_id not in containers:
-                debug_info = 'No container assigned.'
-                batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
 
     def _remove_cancelled_containers(self):
         """
@@ -430,8 +422,8 @@ class ClientProxy:
                 if not self.is_online():
                     self._set_online(ram, cpus)
                     init_succeeded = True
-        except DockerException:
-            pass
+        except DockerException as e:
+            self._log('Failed to init docker client:\n{}'.format(repr(e)))
         return init_succeeded
 
     def _init_gpus(self):
@@ -450,8 +442,9 @@ class ClientProxy:
             else:
                 self._gpus = gpu_devices
         except DockerException:
-            pass
-        except ConnectionError:
+            pass  # If this fails, no gpus are assumed
+        except ConnectionError as e:
+            self._log('GPU Detection failed.\n{}'.format(repr(e)))
             self.do_inspect()
 
     def _inspection_loop(self):
@@ -525,7 +518,8 @@ class ClientProxy:
 
                 if resources_freed:
                     self._scheduling_event.set()
-            except DockerException:
+            except DockerException as e:
+                self._log('Error while checking exited containers:\n{}'.format(repr(e)))
                 self.do_inspect()
 
     def _check_exited_container(self, container, batch):
@@ -545,7 +539,9 @@ class ClientProxy:
             stderr_logs = container.logs(stdout=False).decode('utf-8')
             docker_stats = container.stats(stream=False)
         except Exception as e:
-            debug_info = 'Could not get logs or stats of container: {}'.format(str(e))
+            err_str = repr(e)
+            self._log('Failed to get container logs:\n{}'.format(err_str))
+            debug_info = 'Could not get logs or stats of container: {}'.format(err_str)
             batch_failure(self._mongo, batch_id, debug_info, None, batch['state'])
             return
 
@@ -553,15 +549,19 @@ class ClientProxy:
         try:
             data = json.loads(stdout_logs)
         except json.JSONDecodeError as e:
-            debug_info = 'CC-Agent data is not a valid json object: {}\n\nstdout was:\n{}'.format(str(e), stdout_logs)
+            err_str = repr(e)
+            debug_info = 'CC-Agent data is not a valid json object: {}\n\nstdout was:\n{}'.format(err_str, stdout_logs)
             batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
+            self._log('Failed to load json from blue agent:\n{}'.format(err_str))
             return
 
         try:
             jsonschema.validate(data, agent_result_schema)
         except jsonschema.ValidationError as e:
-            debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(str(e))
+            err_str = repr(e)
+            debug_info = 'CC-Agent data sent by callback does not comply with jsonschema: {}'.format(err_str)
             batch_failure(self._mongo, batch_id, debug_info, data, batch['state'], docker_stats=docker_stats)
+            self._log('Failed to validate blue agent output:\n{}'.format(err_str))
             return
 
         if data['state'] == 'failed':
@@ -631,8 +631,9 @@ class ClientProxy:
 
             try:
                 self._check_for_batches()
-            except TrusteeServiceError:
+            except TrusteeServiceError as e:
                 self.do_inspect()
+                self._log('TrusteeService unavailable while checking for batches:\n{}'.format(repr(e)))
                 continue
 
             self._prune_docker_images()
@@ -657,8 +658,9 @@ class ClientProxy:
             except docker.errors.ImageNotFound:
                 # if image does not exist on this host, proceed
                 continue
-            except ConnectionError:
+            except ConnectionError as e:
                 self.do_inspect()
+                self._log('Failed to get image "{}" with registration time:\n{}'.format(image_url, repr(e)))
                 continue
 
             latest_experiment = self._mongo.db.experiments.find_one(
@@ -698,8 +700,9 @@ class ClientProxy:
                     self._client.images.remove(image.id)
                 except APIError:
                     continue  # if image is used by other images
-                except ConnectionError:
+                except ConnectionError as e:
                     self.do_inspect()
+                    self._log('Failed to remove image:\n{}'.format(repr(e)))
                     break
                 print('removed image {}'.format(image_to_str(image)))
 
