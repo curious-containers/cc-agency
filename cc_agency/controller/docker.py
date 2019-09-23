@@ -194,6 +194,8 @@ class ClientProxy:
 
         # init docker client
         self._client = None
+        # used to prevent "Failed to init docker client" spam
+        self._printed_failed_docker_client_init = False  # type: bool
         self._runtimes = None
         self._gpus = None  # type: List[GPUDevice] or None
         self._online = Event()  # type: Event
@@ -422,8 +424,11 @@ class ClientProxy:
                 if not self.is_online():
                     self._set_online(ram, cpus)
                     init_succeeded = True
+                    self._printed_failed_docker_client_init = False
         except DockerException as e:
-            self._log('Failed to init docker client:\n{}'.format(repr(e)))
+            if not self._printed_failed_docker_client_init:
+                self._log('Failed to init docker client:\n{}'.format(repr(e)))
+                self._printed_failed_docker_client_init = True
         return init_succeeded
 
     def _init_gpus(self):
