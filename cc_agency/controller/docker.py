@@ -425,7 +425,7 @@ class ClientProxy:
                     self._set_online(ram, cpus)
                     init_succeeded = True
                     self._printed_failed_docker_client_init = False
-        except DockerException as e:
+        except (DockerException, ConnectionError) as e:
             if not self._printed_failed_docker_client_init:
                 self._log('Failed to init docker client:\n{}'.format(repr(e)))
                 self._printed_failed_docker_client_init = True
@@ -523,7 +523,7 @@ class ClientProxy:
 
                 if resources_freed:
                     self._scheduling_event.set()
-            except DockerException as e:
+            except (DockerException, ConnectionError) as e:
                 self._log('Error while checking exited containers:\n{}'.format(repr(e)))
                 self.do_inspect()
 
