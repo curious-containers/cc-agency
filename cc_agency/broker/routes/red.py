@@ -106,7 +106,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         if template_keys:
             raise BadRequest(
                 'The given red data contains the following variables: "{}". Please resolve them before submitting'
-                ' to agency. Consider using CC-FAICE (faice exec).'.format(', '.join(template_keys)))
+                ' to agency. Consider using CC-FAICE (faice exec).'.format(', '.join(map(str, template_keys)))
+            )
 
         secret_values = get_secret_values(data)
 
