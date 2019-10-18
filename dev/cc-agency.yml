@@ -1,5 +1,4 @@
 broker:
-  external_url: "http://172.17.0.1:6000"
   auth:
     num_login_attempts: 3
     block_for_seconds: 30
