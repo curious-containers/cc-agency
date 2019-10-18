@@ -1,3 +1,4 @@
+import json
 from time import time
 
 from flask import jsonify, request
@@ -88,16 +89,13 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         :param e: The BadRequest exception, that was thrown
         :type e: BadRequest
-        :return: A response with json describing the error
+        :return: A response with json describing the error and the bad requests return code
         """
         response = e.get_response()
-        response.data = jsonify({
-            'code': e.code,
-            'description': str(e)
-        })
+        response.data = json.dumps(str(e))
         response.content_type = 'application/json'
 
-        return response
+        return response, 400
 
     @app.route('/red', methods=['POST'])
     def post_red():
