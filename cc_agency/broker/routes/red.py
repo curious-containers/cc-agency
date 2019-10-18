@@ -1,6 +1,5 @@
 from time import time
 
-from cc_core.commons.red import red_validation
 from flask import jsonify, request
 from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
@@ -82,6 +81,24 @@ def _prepare_red_data(data, user):
 
 
 def red_routes(app, mongo, auth, controller, trustee_client):
+    @app.errorhandler(BadRequest)
+    def bad_request_handler(e):
+        """
+        An exception handler for bad requests, that puts the exception text into json.
+
+        :param e: The BadRequest exception, that was thrown
+        :type e: BadRequest
+        :return: A response with json describing the error
+        """
+        response = e.get_response()
+        response.data = jsonify({
+            'code': e.code,
+            'description': str(e)
+        })
+        response.content_type = 'application/json'
+
+        return response
+
     @app.route('/red', methods=['POST'])
     def post_red():
         user = auth.verify_user(request.authorization)
