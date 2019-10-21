@@ -113,7 +113,7 @@ class Auth:
             # create authorization cookie
             if cookie_token is None:
                 token = self._issue_token(username, ip)
-                user.set_authentication_cookie(encode_authentication_cookie(username, token))
+                user.set_authentication_cookie(encode_authentication_cookie(username, str(token)))
             else:
                 # do not create new cookie if one is present
                 user.set_authentication_cookie(encode_authentication_cookie(username, cookie_token))
