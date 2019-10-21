@@ -1,3 +1,4 @@
+import base64
 from os import urandom
 from binascii import hexlify
 from time import time
@@ -8,6 +9,32 @@ from bson.objectid import ObjectId
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+
+def decode_authentication_cookie(cookie_value):
+    """
+    Extracts the username and value from the given cookie value.
+
+    The value of the cookie should match the following format: base64(username):identifier
+
+    :param cookie_value: The value of the authentication cookie.
+    :return: A tuple (username, token) read from the given cookie value
+    """
+    username_base64, token = cookie_value.split(':', maxsplit=1)
+    return base64.b64decode(username_base64), str(token)
+
+
+def encode_authentication_cookie(username, token):
+    """
+    Encodes the given username and the given token into one bytes object of the following form:
+
+    base64(username):token
+
+    :param username: The username to encode
+    :param token: The token to encode
+    :return: A bytes object that contains both information
+    """
+    return base64.b64encode(username) + ':' + token
 
 
 def create_flask_response(data, auth, authentication_cookie=None):

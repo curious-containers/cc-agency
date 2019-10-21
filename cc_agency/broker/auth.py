@@ -5,8 +5,8 @@ from cryptography.exceptions import InvalidKey
 from werkzeug.datastructures import WWWAuthenticate
 from werkzeug.exceptions import Unauthorized
 
-from cc_agency.commons.helper import generate_secret, create_kdf
-
+from cc_agency.commons.helper import generate_secret, create_kdf, decode_authentication_cookie, \
+    encode_authentication_cookie
 
 AUTHORIZATION_COOKIE_KEY = 'authorization_cookie'
 DEFAULT_REALM = 'Please fill in username and password'
@@ -34,7 +34,7 @@ class Auth:
             Sets the authentication cookie to a tuple containing (key, value) with the given value.
 
             :param value: The value the key should be set to
-            :type value: str
+            :type value: bytes
             """
             self.authentication_cookie = (AUTHORIZATION_COOKIE_KEY, value)
 
@@ -79,35 +79,48 @@ class Auth:
 
         :raise Unauthorized: Raises an Unauthorized exception, if authorization failed.
         """
-        if not auth:
-            raise Auth._create_unauthorized(description='Missing Authentication information')
+        # check authorization information
+        auth_password = None
+        cookie_token = None
+        if auth:
+            username = auth.username
+            auth_password = auth.password
+        else:  # check authentication cookie, only if auth is not supplied
+            authorization_cookie = cookies.get(AUTHORIZATION_COOKIE_KEY)
 
-        username = auth.username
-        request_password = auth.password
+            if authorization_cookie:
+                username, cookie_token = decode_authentication_cookie(authorization_cookie)
+            else:
+                raise Auth._create_unauthorized(description='Missing Authentication information')
 
         db_user = self._mongo.db['users'].find_one({'username': username})  # type: dict
 
         if not db_user:
             raise Auth._create_unauthorized(description='Could not find user "{}".'.format(username))
 
-        user = Auth.User(db_user['username'], db_user['is_admin'])
+        user = Auth.User(username, db_user['is_admin'])
 
         salt = db_user['salt']
         del db_user['salt']
 
-        if self._is_blocked_temporarily(user.username):
+        if self._is_blocked_temporarily(username):
             raise Auth._create_unauthorized(
-                description='The user "{}" is currently blocked due to frequent invalid login attempts.'.format(username)
+                'The user "{}" is currently blocked due to invalid login attempts.'.format(username)
             )
 
-        if self._verify_user_by_cookie(user, cookies, ip):
-            user.set_authentication_cookie(cookies.get(AUTHORIZATION_COOKIE_KEY))
-            return user
-
-        if self._verify_user_by_credentials(db_user['password'], request_password, salt):
+        if self._verify_user_by_credentials(db_user['password'], auth_password, salt):
             user.verified_by_credentials = True
             # create authorization cookie
-            user.set_authentication_cookie(self._issue_token(user, ip))
+            if cookie_token is None:
+                token = self._issue_token(username, ip)
+                user.set_authentication_cookie(encode_authentication_cookie(username, token))
+            else:
+                # do not create new cookie if one is present
+                user.set_authentication_cookie(encode_authentication_cookie(username, cookie_token))
+            return user
+
+        if self._verify_user_by_cookie(username, cookie_token, ip):
+            user.set_authentication_cookie(encode_authentication_cookie(username, cookie_token))
             return user
 
         self._add_block_entry(username)
@@ -137,22 +150,25 @@ class Auth:
         })
         print('Unverified login attempt: added block entry!')
 
-    def _issue_token(self, user, ip):
+    def _issue_token(self, username, ip):
         """
         Creates a token in the mongo token db with the fields: [username, ip, salt, token, timestamp] and returns it.
 
-        :param user: The user for which a token should be created
-        :type user: Auth.User
+        :param username: The user for which a token should be created
+        :type username: str
         :param ip: The ip address of the user request
         :type ip: str
         :return: The created token
         :rtype: bytes
         """
+        # first remove old tokens of this user and this ip
+        self._mongo.db['tokens'].delete_many({'username': username, 'ip': ip})
+
         salt = urandom(16)
         kdf = create_kdf(salt)
         token = generate_secret()
         self._mongo.db['tokens'].insert_one({
-            'username': user.username,
+            'username': username,
             'ip': ip,
             'salt': salt,
             'token': kdf.derive(token.encode('utf-8')),
@@ -160,14 +176,14 @@ class Auth:
         })
         return token
 
-    def _verify_user_by_cookie(self, user, cookies, ip):
+    def _verify_user_by_cookie(self, username, cookie_token, ip):
         """
         Returns whether the given user is authorized by the token, given by the received cookies.
 
-        :param user: The user to check for
-        :type user: Auth.User
-        :param cookies: The cookies given by the user request
-        :type cookies: dict
+        :param username: The username to check for
+        :type username: str
+        :param cookie_token: The authorization token of the cookie given by the user request
+        :type cookie_token: str
         :param ip: The ip address of the user request
         :type ip: str
         :return: True, if the given user could be authorized by an authorization cookie
@@ -177,18 +193,17 @@ class Auth:
         self._mongo.db['tokens'].delete_many({'timestamp': {'$lt': time() - self.tokens_valid_for_seconds}})
 
         # get authorization cookie
-        token = cookies.get(AUTHORIZATION_COOKIE_KEY)
-        if token is None:
+        if cookie_token is None:
             return False
 
         cursor = self._mongo.db['tokens'].find(
-            {'username': user.username, 'ip': ip},
+            {'username': username, 'ip': ip},
             {'token': 1, 'salt': 1}
         )
         for c in cursor:
             kdf = create_kdf(c['salt'])
             try:
-                kdf.verify(token.encode('utf-8'), c['token'])
+                kdf.verify(cookie_token.encode('utf-8'), c['token'])
                 return True
             except InvalidKey:  # if token does not fit, try the next
                 pass
@@ -206,6 +221,9 @@ class Auth:
         :param salt: The salt value of the user from the db
         :return:
         """
+        if request_password is None:
+            return False
+
         kdf = create_kdf(salt)
         try:
             kdf.verify(request_password.encode('utf-8'), db_password)
