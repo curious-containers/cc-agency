@@ -25,8 +25,8 @@ def create_flask_response(data, auth, authentication_cookie=None):
     )
     if authentication_cookie:
         flask_response.set_cookie(
-            auth.AUTHORIZATION_COOKIE_KEY,
-            authentication_cookie,
+            authentication_cookie[0],
+            authentication_cookie[1],
             expires=time() + auth.tokens_valid_for_seconds
         )
     return flask_response

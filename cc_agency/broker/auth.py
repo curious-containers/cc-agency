@@ -29,6 +29,15 @@ class Auth:
             self.verified_by_credentials = False
             self.is_admin = is_admin
 
+        def set_authentication_cookie(self, value):
+            """
+            Sets the authentication cookie to a tuple containing (key, value) with the given value.
+
+            :param value: The value the key should be set to
+            :type value: str
+            """
+            self.authentication_cookie = (AUTHORIZATION_COOKIE_KEY, value)
+
     def __init__(self, conf, mongo):
         self._num_login_attempts = conf.d['broker']['auth']['num_login_attempts']
         self._block_for_seconds = conf.d['broker']['auth']['block_for_seconds']
@@ -92,13 +101,13 @@ class Auth:
             )
 
         if self._verify_user_by_cookie(user, cookies, ip):
-            user.authentication_cookie = cookies.get(AUTHORIZATION_COOKIE_KEY)
+            user.set_authentication_cookie(cookies.get(AUTHORIZATION_COOKIE_KEY))
             return user
 
         if self._verify_user_by_credentials(db_user['password'], request_password, salt):
             user.verified_by_credentials = True
             # create authorization cookie
-            user.authentication_cookie = self._issue_token(user, ip)
+            user.set_authentication_cookie(self._issue_token(user, ip))
             return user
 
         self._add_block_entry(username)
