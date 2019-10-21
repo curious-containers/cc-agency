@@ -2,11 +2,34 @@ from os import urandom
 from binascii import hexlify
 from time import time
 
+import flask
 from flask import request
 from bson.objectid import ObjectId
 from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives.hashes import SHA256
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+
+
+def create_flask_response(data, auth, authentication_cookie=None):
+    """
+    Creates a flask response object, containing the given json data and the given authentication cookie.
+
+    :param data: The data to send as json object
+    :param auth: The auth object to use
+    :param authentication_cookie: The value for the authentication cookie
+    :return: A flask response object
+    """
+    flask_response = flask.make_response(
+        flask.jsonify(data),
+        200
+    )
+    if authentication_cookie:
+        flask_response.set_cookie(
+            auth.AUTHORIZATION_COOKIE_KEY,
+            authentication_cookie,
+            expires=time() + auth.tokens_valid_for_seconds
+        )
+    return flask_response
 
 
 def get_ip():

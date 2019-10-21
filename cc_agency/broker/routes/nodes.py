@@ -1,6 +1,7 @@
-from flask import jsonify, request
-from werkzeug.exceptions import Unauthorized
+from flask import request
 from bson.objectid import ObjectId
+
+from cc_agency.commons.helper import create_flask_response
 
 
 def _get_node_gpu_info(conf_nodes, node_name):
@@ -14,12 +15,10 @@ def _get_node_gpu_info(conf_nodes, node_name):
     return None
 
 
-def nodes_routes(app, mongo, auth, conf):
+def nodes_routes(app, mongo, auth):
     @app.route('/nodes', methods=['GET'])
     def get_nodes():
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         cursor = mongo.db['nodes'].find()
 
@@ -54,4 +53,4 @@ def nodes_routes(app, mongo, auth, conf):
             node['currentBatches'] = batches_ram
             del node['_id']
 
-        return jsonify(nodes)
+        return create_flask_response(nodes, auth, user.authentication_cookie)

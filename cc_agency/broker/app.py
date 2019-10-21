@@ -5,6 +5,7 @@ from flask import Flask, jsonify, request
 from werkzeug.exceptions import Unauthorized
 import zmq
 
+from cc_agency.commons.helper import create_flask_response
 from cc_core.version import VERSION as CORE_VERSION
 from cc_agency.version import VERSION as AGENCY_VERSION
 from cc_agency.commons.conf import Conf
@@ -13,7 +14,6 @@ from cc_agency.commons.secrets import TrusteeClient
 from cc_agency.broker.auth import Auth
 from cc_agency.broker.routes.red import red_routes
 from cc_agency.broker.routes.nodes import nodes_routes
-from cc_agency.broker.routes.auth import auth_routes
 
 
 DESCRIPTION = 'CC-Agency Broker.'
@@ -49,18 +49,16 @@ def get_root():
 
 @app.route('/version', methods=['GET'])
 def get_version():
-    user = auth.verify_user(request.authorization)
-    if not user:
-        raise Unauthorized()
+    user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
-    return jsonify({
-        'agencyVersion': AGENCY_VERSION,
-        'coreVersion': CORE_VERSION
-    })
+    return create_flask_response(
+        {'agencyVersion': AGENCY_VERSION, 'coreVersion': CORE_VERSION},
+        auth,
+        user.authentication_cookie
+    )
 
 
 red_routes(app, mongo, auth, controller, trustee_client)
-nodes_routes(app, mongo, auth, conf)
-auth_routes(app, auth, conf)
+nodes_routes(app, mongo, auth)
 
 controller.send_json({'destination': 'scheduler'})

@@ -1,8 +1,8 @@
 import json
 from time import time
 
-from flask import jsonify, request
-from werkzeug.exceptions import Unauthorized, BadRequest, NotFound, InternalServerError
+from flask import request
+from werkzeug.exceptions import BadRequest, NotFound, InternalServerError
 from bson.objectid import ObjectId
 
 from cc_core.commons.red import red_validation
@@ -11,7 +11,7 @@ from cc_core.commons.templates import get_template_keys, get_secret_values, norm
 from cc_core.commons.exceptions import exception_format
 from cc_core.commons.red_to_blue import convert_red_to_blue
 
-from cc_agency.commons.helper import str_to_bool
+from cc_agency.commons.helper import str_to_bool, create_flask_response
 from cc_agency.commons.secrets import separate_secrets_batch, separate_secrets_experiment
 
 
@@ -19,7 +19,7 @@ def _prepare_red_data(data, user):
     timestamp = time()
 
     experiment = {
-        'username': user['username'],
+        'username': user.username,
         'registrationTime': timestamp,
         'redVersion': data['redVersion'],
         'cli': data['cli'],
@@ -55,7 +55,7 @@ def _prepare_red_data(data, user):
 
     for i, rb in enumerate(raw_batches):
         batch = {
-            'username': user['username'],
+            'username': user.username,
             'registrationTime': timestamp,
             'state': 'registered',
             'batchesListIndex': i,
@@ -82,6 +82,16 @@ def _prepare_red_data(data, user):
 
 
 def red_routes(app, mongo, auth, controller, trustee_client):
+    """
+    Creates the red broker endpoints.
+
+    :param app: The flask app to attach to
+    :param mongo: The mongo client
+    :param auth: The authorization module to use
+    :param controller: The controller to communicate with the scheduler
+    :param trustee_client: The trustee client
+    """
+
     @app.errorhandler(BadRequest)
     def bad_request_handler(e):
         """
@@ -99,9 +109,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
     @app.route('/red', methods=['POST'])
     def post_red():
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         if not request.json:
             raise BadRequest('Did not send RED data as JSON.')
@@ -167,13 +175,11 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         controller.send_json({'destination': 'scheduler'})
 
-        return jsonify({'experimentId': experiment_id})
+        return create_flask_response({'experimentId': experiment_id}, auth, user.authentication_cookie)
 
     @app.route('/batches/<object_id>', methods=['DELETE'])
     def delete_batches(object_id):
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         try:
             bson_id = ObjectId(object_id)
@@ -183,9 +189,9 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         match = {'_id': bson_id}
         match_with_state = {'_id': bson_id, 'state': {'$nin': ['succeeded', 'failed', 'cancelled']}}
 
-        if not user['is_admin']:
-            match['username'] = user['username']
-            match_with_state['username'] = user['username']
+        if not user.is_admin:
+            match['username'] = user.username
+            match_with_state['username'] = user.username
 
         o = mongo.db['batches'].find_one(match, {'state': 1})
         if not o:
@@ -214,7 +220,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         controller.send_json({'destination': 'scheduler'})
 
-        return jsonify(o)
+        return create_flask_response(o, auth, user.authentication_cookie)
 
     @app.route('/experiments/count', methods=['GET'])
     def get_experiments_count():
@@ -241,9 +247,7 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         return get_collection_id('batches', object_id)
 
     def get_collection_id(collection, object_id):
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         try:
             bson_id = ObjectId(object_id)
@@ -252,20 +256,18 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         match = {'_id': bson_id}
 
-        if not user['is_admin']:
-            match['username'] = user['username']
+        if not user.is_admin:
+            match['username'] = user.username
 
         o = mongo.db[collection].find_one(match)
         if not o:
             raise NotFound('Could not find Object.')
 
         o['_id'] = str(o['_id'])
-        return jsonify(o)
+        return create_flask_response(o, auth, user.authentication_cookie)
 
     def get_collection_count(collection):
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         username = request.args.get('username', default=None, type=str)
         node = None
@@ -285,8 +287,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         aggregate = []
 
-        if not user['is_admin']:
-            aggregate.append({'$match': {'username': user['username']}})
+        if not user.is_admin:
+            aggregate.append({'$match': {'username': user.username}})
 
         match = {}
 
@@ -309,14 +311,12 @@ def red_routes(app, mongo, auth, controller, trustee_client):
         cursor = list(cursor)
         
         if not cursor:
-            return jsonify({'count': 0})
+            return create_flask_response({'count': 0}, auth, user.authentication_cookie)
 
-        return jsonify(cursor[0])
+        return create_flask_response(cursor[0], auth, user.authentication_cookie)
 
     def get_collection(collection):
-        user = auth.verify_user(request.authorization)
-        if not user:
-            raise Unauthorized()
+        user = auth.verify_user(request.authorization, request.cookies, request.remote_addr)
 
         skip = request.args.get('skip', default=None, type=int)
         limit = request.args.get('limit', default=None, type=int)
@@ -345,8 +345,8 @@ def red_routes(app, mongo, auth, controller, trustee_client):
 
         aggregate = []
 
-        if not user['is_admin']:
-            aggregate.append({'$match': {'username': user['username']}})
+        if not user.is_admin:
+            aggregate.append({'$match': {'username': user.username}})
 
         match = {}
 
@@ -392,4 +392,4 @@ def red_routes(app, mongo, auth, controller, trustee_client):
             e['_id'] = str(e['_id'])
             result.append(e)
 
-        return jsonify(result)
+        return create_flask_response(result, auth, user.authentication_cookie)
