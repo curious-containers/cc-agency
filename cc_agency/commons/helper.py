@@ -18,12 +18,13 @@ def decode_authentication_cookie(cookie_value):
     The value of the cookie should match the following format: base64(username):identifier
 
     :param cookie_value: The value of the authentication cookie.
-    :type cookie_value: bytes
+    :type cookie_value: str
     :return: A tuple (username, token) read from the given cookie value
-    :rtype: str
+    :rtype: tuple[str, str]
     """
-    username_base64, token = cookie_value.split(':'.encode('utf-8'), maxsplit=1)
-    return str(base64.b64decode(username_base64), str(token))
+    username_base64, token = cookie_value.split(':', maxsplit=1)
+    username = base64.b64decode(username_base64.encode('utf-8')).decode('utf-8')
+    return username, str(token)
 
 
 def encode_authentication_cookie(username, token):
@@ -36,9 +37,13 @@ def encode_authentication_cookie(username, token):
     :type username: str
     :param token: The token to encode
     :type token: str
-    :return: A bytes object that contains both information
+    :return: A str that contains username and token
+    :rtype: str
     """
-    return base64.b64encode(username.encode('utf-8')) + ':'.encode('utf-8') + token.encode('utf-8')
+    return '{}:{}'.format(
+        base64.b64encode(username.encode('utf-8')).decode('utf-8'),
+        token
+    )
 
 
 def create_flask_response(data, auth, authentication_cookie=None):
