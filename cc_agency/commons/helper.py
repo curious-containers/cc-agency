@@ -38,7 +38,7 @@ def encode_authentication_cookie(username, token):
     :type token: str
     :return: A bytes object that contains both information
     """
-    return base64.b64encode(username.encode('utf-8')) + ':' + token.encode('utf-8')
+    return base64.b64encode(username.encode('utf-8')) + ':'.encode('utf-8') + token.encode('utf-8')
 
 
 def create_flask_response(data, auth, authentication_cookie=None):
